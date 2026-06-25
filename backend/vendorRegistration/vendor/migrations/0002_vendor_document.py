@@ -6,7 +6,38 @@ class Migration(migrations.Migration):
     dependencies = [("vendor", "0001_initial")]
 
     operations = [
-        # Sync Django's model state with the actual DB schema (tables already have custom PKs)
+        # On a FRESH database, 0001 creates tables with 'id' as PK.
+        # Rename them to the correct column names expected by the rest of the migrations.
+        # The DO $$ blocks are no-ops if the columns already have the right names
+        # (safe for existing installs where this was previously faked).
+        migrations.RunSQL(
+            sql="""
+                -- Rename 'id' → 'registration_id' in tb_vendor_registration if needed
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'tb_vendor_registration' AND column_name = 'id'
+                    ) THEN
+                        ALTER TABLE tb_vendor_registration RENAME COLUMN id TO registration_id;
+                    END IF;
+                END $$;
+
+                -- Rename 'id' → 'user_id' in tb_vendor_user if needed
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'tb_vendor_user' AND column_name = 'id'
+                    ) THEN
+                        ALTER TABLE tb_vendor_user RENAME COLUMN id TO user_id;
+                    END IF;
+                END $$;
+            """,
+            reverse_sql=migrations.RunSQL.noop,
+        ),
+
+        # Sync Django's model state with the actual DB schema
         migrations.SeparateDatabaseAndState(
             database_operations=[],
             state_operations=[
@@ -36,25 +67,27 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
-        # Create tb_vendor_documents table directly (bypasses broken FK state)
+
+        # Create tb_vendor_documents
         migrations.RunSQL(
             sql="""
                 CREATE TABLE IF NOT EXISTS tb_vendor_documents (
-                    document_id  BIGSERIAL    PRIMARY KEY,
-                    registration_id BIGINT   NOT NULL
+                    document_id     BIGSERIAL    PRIMARY KEY,
+                    registration_id BIGINT       NOT NULL
                         REFERENCES tb_vendor_registration(registration_id) ON DELETE CASCADE,
-                    document_type VARCHAR(50) NOT NULL,
-                    file_name     VARCHAR(255) NOT NULL,
-                    file_path     TEXT         NOT NULL,
-                    uploaded_by   INTEGER,
-                    uploaded_date TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-                    status        VARCHAR(20)  NOT NULL DEFAULT 'Pending',
+                    document_type   VARCHAR(50)  NOT NULL,
+                    file_name       VARCHAR(255) NOT NULL,
+                    file_path       TEXT         NOT NULL,
+                    uploaded_by     INTEGER,
+                    uploaded_date   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    status          VARCHAR(20)  NOT NULL DEFAULT 'Pending',
                     CONSTRAINT uq_vendor_doc UNIQUE (registration_id, document_type)
                 );
             """,
             reverse_sql="DROP TABLE IF EXISTS tb_vendor_documents;",
         ),
-        # Register VendorDocument in Django's state without touching the DB
+
+        # Register VendorDocument in Django's state
         migrations.SeparateDatabaseAndState(
             database_operations=[],
             state_operations=[

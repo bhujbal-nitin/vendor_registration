@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import VendorDocument, VendorProfile, VendorGST, VendorBankDetails, VendorContactDetails
+from .models import VendorDocument, VendorProfile, VendorGST, VendorBankDetails
 
 
 class RegisterRequestSerializer(serializers.Serializer):
@@ -19,7 +19,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         model  = VendorDocument
         fields = [
             "document_id", "registration_id", "document_type",
-            "file_name", "file_path", "uploaded_by", "uploaded_date", "status",
+            "file_name", "file_path", "file_size", "uploaded_by", "uploaded_date",
         ]
 
 
@@ -28,7 +28,7 @@ class VendorProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = VendorProfile
-        fields = ["profile_id", "registration_id", "address", "goods_service_description", "gstin", "created_date", "updated_date"]
+        fields = ["profile_id", "registration_id", "vendor_name", "vendor_type", "address", "goods_service_description", "website", "created_date", "updated_date"]
 
 
 class VendorGSTSerializer(serializers.ModelSerializer):
@@ -46,13 +46,6 @@ class VendorBankDetailsSerializer(serializers.ModelSerializer):
         model  = VendorBankDetails
         fields = ["bank_id", "registration_id", "bank_name", "account_holder_name", "account_number", "ifsc_code", "branch_name", "account_type", "is_primary", "status"]
 
-
-class VendorContactDetailsSerializer(serializers.ModelSerializer):
-    registration_id = serializers.IntegerField(source="registration.registration_id", read_only=True)
-
-    class Meta:
-        model  = VendorContactDetails
-        fields = ["contact_id", "registration_id", "contact_person", "designation", "email", "mobile", "is_primary"]
 
 
 class RegistrationFormSerializer(serializers.Serializer):

@@ -159,7 +159,7 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
         })}
       </Box>
 
-      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end' }}>
+      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end', backgroundColor: 'rgba(255,255,255,0.05)' }}>
         <IconButton onClick={onToggle} size="small" sx={{ color: 'rgba(255,255,255,0.4)', '&:hover': { backgroundColor: 'rgba(255,255,255,0.08)', color: '#fff' } }}>
           {collapsed ? <ChevronRightIcon fontSize="small" /> : <ChevronLeftIcon fontSize="small" />}
         </IconButton>
@@ -190,7 +190,7 @@ function TopBar({ user }: TopBarProps) {
           <Avatar sx={{ width: 32, height: 32, background: 'linear-gradient(135deg,#FF6B00,#FF8C33)', fontSize: 13, fontWeight: 700 }}>{(user.email || 'V').charAt(0).toUpperCase()}</Avatar>
           <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
             <Typography variant="body2" fontWeight={700} color="text.primary" lineHeight={1.2} noWrap sx={{ maxWidth: 180 }}>{user.email || '—'}</Typography>
-            <Typography variant="caption" color="text.secondary" lineHeight={1}>{user.registration_status || 'Draft'}</Typography>
+            <Typography variant="caption" color="text.secondary" lineHeight={1}>{user.registration_status || 'DRAFT'}</Typography>
           </Box>
         </Stack>
         <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)} PaperProps={{ elevation: 3, sx: { borderRadius: 2, minWidth: 210, mt: 1 } }} transformOrigin={{ horizontal: 'right', vertical: 'top' }} anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}>
@@ -385,7 +385,7 @@ function DocCard({ doc, isUploaded, isUploading, progress, file, serverFileName,
   )
 }
 
-const LOCKED_STATUSES = ['Submitted', 'Under Review', 'Resubmitted', 'Approved', 'Rejected', 'Tally Sync Pending', 'Completed']
+const LOCKED_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'APPROVED', 'REJECTED']
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function DocumentUpload() {
@@ -407,16 +407,37 @@ export default function DocumentUpload() {
   const user: VendorUser = JSON.parse(sessionStorage.getItem('vendor_user') || '{}')
   useEffect(() => { if (!user.email) navigate('/vendor-registration', { replace: true }) }, [user.email, navigate])
 
+  // Live status — refreshed from backend on every mount/refresh so SEND_BACK is picked up immediately
+  const [liveStatus, setLiveStatus] = useState<string>(user.registration_status || 'DRAFT')
+  useEffect(() => {
+    if (!user.registration_id) return
+    fetch(`/api/registration/form-data?registration_id=${user.registration_id}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data: { registration_status?: string }) => {
+        if (data.registration_status) {
+          setLiveStatus(data.registration_status)
+          const updated = { ...user, registration_status: data.registration_status }
+          sessionStorage.setItem('vendor_user', JSON.stringify(updated))
+        }
+      })
+      .catch(() => {})
+  }, [user.registration_id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cleanup polling timers on unmount
   useEffect(() => () => { Object.values(pollTimers.current).forEach(clearTimeout) }, [])
 
-  // Navigate once all docs finish analysing (or 60s timeout from "continue" click)
+  const [waitSecondsLeft, setWaitSecondsLeft] = useState(60)
+
+  // Navigate once all docs finish analysing (or 60s timeout from button click)
   useEffect(() => {
     if (!awaitingAnalysis) return
+    setWaitSecondsLeft(60)
     const start = Date.now()
     const check = setInterval(() => {
+      const elapsed = Date.now() - start
+      setWaitSecondsLeft(Math.max(0, Math.ceil((60_000 - elapsed) / 1000)))
       const anyPending = Object.values(docAnalysisRef.current).some(d => d.status === 'analysing')
-      if (!anyPending || Date.now() - start > 60_000) {
+      if (!anyPending || elapsed > 60_000) {
         clearInterval(check)
         setAwaitingAnalysis(false)
         navigate('/vendor-registration/form')
@@ -497,7 +518,7 @@ export default function DocumentUpload() {
     clearTimeout(pollTimers.current[docId])
     const startTime = Date.now()
     const tick = async () => {
-      if (Date.now() - startTime > 60_000) {
+      if (Date.now() - startTime > 100_000) {
         setDocAnalysis(prev => ({ ...prev, [docId]: { requestId, status: 'failed' } }))
         return
       }
@@ -533,10 +554,9 @@ export default function DocumentUpload() {
   const isDocDone = (docId: string) => !!files[docId] || !!serverDocs[docId]
   const uploadedCount = DOCS.filter((d) => isDocDone(d.id)).length
   const allUploaded = uploadedCount === DOCS.length
-  const isSentBack = (user.registration_status || '') === 'Sent Back'
-  const isStatusLocked = LOCKED_STATUSES.includes(user.registration_status || '')
-  // Lock only when submission status prevents changes (not based on upload count)
-  const isLocked = !isSentBack && isStatusLocked
+  const isSentBack     = liveStatus === 'SEND_BACK'
+  const isStatusLocked = LOCKED_STATUSES.includes(liveStatus)
+  const isLocked       = !isSentBack && isStatusLocked
 
   return (
     <ThemeProvider theme={theme}>
@@ -642,7 +662,14 @@ export default function DocumentUpload() {
                   )}
 
                   <Button fullWidth variant="contained" endIcon={<ArrowForwardIcon />}
-                    onClick={() => setConfirmFormOpen(true)}
+                    onClick={() => {
+                      const anyAnalysing = Object.values(docAnalysis).some(d => d.status === 'analysing')
+                      if (anyAnalysing) {
+                        setAwaitingAnalysis(true)
+                      } else {
+                        navigate('/vendor-registration/form')
+                      }
+                    }}
                     sx={{ py: 1.2, fontSize: 13, background: 'linear-gradient(135deg,#FF6B00,#FF8C33)', color: '#fff', boxShadow: '0 4px 16px rgba(255,107,0,0.25)', '&:hover': { background: 'linear-gradient(135deg,#E55A00,#FF6B00)' } }}>
                     {isStatusLocked ? 'View Registration Form' : 'Next: Registration Form'}
                   </Button>
@@ -706,17 +733,23 @@ export default function DocumentUpload() {
         </DialogActions>
       </Dialog>
 
-      {/* Awaiting analysis dialog — shown when continuing to form while docs are still being analysed */}
+      {/* Awaiting analysis dialog — shown when docs are still being analysed */}
       <Dialog open={awaitingAnalysis} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
-        <DialogContent sx={{ textAlign: 'center', py: 5, px: 4 }}>
-          <CircularProgress size={44} sx={{ color: '#FF6B00', mb: 2.5 }} />
-          <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#1A1A2E', mb: 1 }}>
+        <DialogContent sx={{ textAlign: 'center', py: 4, px: 4 }}>
+          <CircularProgress size={44} sx={{ color: '#FF6B00', mb: 2 }} />
+          <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#1A1A2E', mb: 0.75 }}>
             Analysing your documents
           </Typography>
-          <Typography sx={{ fontSize: 13, color: '#6B7280', lineHeight: 1.7 }}>
-            Please wait while we process your documents.<br />
-            This may take up to a minute.
+          <Typography sx={{ fontSize: 13, color: '#6B7280', lineHeight: 1.7, mb: 1.5 }}>
+            Waiting for OCR analysis to complete.<br />
+            Proceeding automatically in{' '}
+            <Box component="span" sx={{ fontWeight: 700, color: '#FF6B00' }}>{waitSecondsLeft}s</Box>.
           </Typography>
+          <Button size="small" variant="outlined"
+            onClick={() => { setAwaitingAnalysis(false); navigate('/vendor-registration/form') }}
+            sx={{ fontSize: 12, borderColor: '#FF6B00', color: '#FF6B00', '&:hover': { backgroundColor: '#FFF5EE' } }}>
+            Proceed Now
+          </Button>
         </DialogContent>
       </Dialog>
 

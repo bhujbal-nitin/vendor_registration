@@ -79,7 +79,7 @@ This is an auto-generated email. Do not reply.
 
 # ── Per-action email configs ──────────────────────────────────────────────────
 _ACTION_CFG = {
-    "Approved": {
+    "APPROVED": {
         "header_bg":    "linear-gradient(135deg,#059669,#10B981)",
         "header_title": "Registration Approved",
         "header_sub":   "Your vendor registration has been approved",
@@ -94,8 +94,9 @@ _ACTION_CFG = {
         ),
         "footer_text":  "Welcome aboard! If you have any questions, please contact our finance team.",
         "show_remarks": False,
+        "label":        "Approved",
     },
-    "Rejected": {
+    "REJECTED": {
         "header_bg":    "linear-gradient(135deg,#DC2626,#EF4444)",
         "header_title": "Registration Not Approved",
         "header_sub":   "Your vendor registration could not be approved",
@@ -110,8 +111,9 @@ _ACTION_CFG = {
         ),
         "footer_text":  "If you believe this decision is incorrect, please contact our finance team.",
         "show_remarks": True,
+        "label":        "Rejected",
     },
-    "Sent Back": {
+    "SEND_BACK": {
         "header_bg":    "linear-gradient(135deg,#D97706,#F59E0B)",
         "header_title": "Action Required",
         "header_sub":   "Your registration form needs corrections",
@@ -128,6 +130,7 @@ _ACTION_CFG = {
         ),
         "footer_text":  "Please log in to the Vendor Portal to edit and resubmit your form.",
         "show_remarks": True,
+        "label":        "Sent Back",
     },
 }
 
@@ -148,9 +151,9 @@ def send_vendor_status_email(
         raise ValueError(f"No email template defined for action '{action}'")
 
     subject_map = {
-        "Approved":  f"Congratulations! Your Vendor Registration {registration_no} has been Approved",
-        "Rejected":  f"Vendor Registration {registration_no} — Application Not Approved",
-        "Sent Back": f"Action Required: Vendor Registration {registration_no} Needs Corrections",
+        "APPROVED":  f"Congratulations! Your Vendor Registration {registration_no} has been Approved",
+        "REJECTED":  f"Vendor Registration {registration_no} — Application Not Approved",
+        "SEND_BACK": f"Action Required: Vendor Registration {registration_no} Needs Corrections",
     }
     subject = subject_map[action]
 
@@ -197,7 +200,7 @@ def send_vendor_status_email(
           <tr><td colspan="2" style="height:6px;"></td></tr>
           <tr>
             <td style="padding:10px 12px;background:#F9FAFB;border-radius:6px 0 0 6px;color:#6B7280;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Status</td>
-            <td style="padding:10px 12px;background:#F9FAFB;border-radius:0 6px 6px 0;font-weight:700;color:#1A1A2E;">{action}</td>
+            <td style="padding:10px 12px;background:#F9FAFB;border-radius:0 6px 6px 0;font-weight:700;color:#1A1A2E;">{cfg['label']}</td>
           </tr>
         </table>
 

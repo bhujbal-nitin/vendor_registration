@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Box, Typography, Button, Paper, Stack, Chip, Divider,
@@ -166,7 +166,7 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
           )
         })}
       </Box>
-      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end' }}>
+      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end', backgroundColor: 'rgba(255,255,255,0.05)' }}>
         <IconButton onClick={onToggle} size="small" sx={{ color: 'rgba(255,255,255,0.4)', '&:hover': { backgroundColor: 'rgba(255,255,255,0.08)', color: '#fff' } }}>
           {collapsed ? <ChevronRightIcon fontSize="small" /> : <ChevronLeftIcon fontSize="small" />}
         </IconButton>
@@ -254,9 +254,15 @@ export default function VendorRegistrationForm() {
 
   const user: VendorUser = JSON.parse(sessionStorage.getItem('vendor_user') || '{}')
 
-  const READ_ONLY_STATUSES = ['Submitted', 'Under Review', 'Resubmitted', 'Approved', 'Rejected', 'Tally Sync Pending', 'Completed']
-  const isSentBack = (user.registration_status || '') === 'Sent Back'
-  const isReadOnly = READ_ONLY_STATUSES.includes(user.registration_status || '')
+  const [liveStatus, setLiveStatus] = useState<string>(user.registration_status || 'DRAFT')
+
+  const READ_ONLY_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'APPROVED', 'REJECTED']
+  const isSentBack = liveStatus === 'SEND_BACK'
+  const isReadOnly = READ_ONLY_STATUSES.includes(liveStatus)
+
+  // Ref kept in sync so the merged form-load effect reads the correct isSentBack
+  // value synchronously inside its .then() (before React re-renders with the new state).
+  const isSentBackRef = useRef(isSentBack)
 
   const [form, setForm] = useState<FormState>({
     vendorName: user.vendor_name || '', email: user.email || '', phone: '',
@@ -275,6 +281,15 @@ export default function VendorRegistrationForm() {
       .then((r) => r.json())
       .then((data) => {
         if (!data.registration_id) return
+
+        // Update live status first — and sync the ref before pick() runs below
+        if (data.registration_status) {
+          const sentBack = data.registration_status === 'SEND_BACK'
+          isSentBackRef.current = sentBack      // sync ref immediately (before re-render)
+          setLiveStatus(data.registration_status)
+          sessionStorage.setItem('vendor_user', JSON.stringify({ ...user, registration_status: data.registration_status }))
+        }
+
         if (data.review_remarks) setReviewRemarks(data.review_remarks)
         // Store registration PAN for submit-time validation
         if (data.pan) setRegistrationPAN(data.pan)
@@ -289,7 +304,7 @@ export default function VendorRegistrationForm() {
         // First-time submission:
         //   saved DB value > any OCR extraction.
         const pick = (saved: string, extracted: string, freshExtracted = '') =>
-          isSentBack ? (freshExtracted || saved || extracted) : (saved || extracted)
+          isSentBackRef.current ? (freshExtracted || saved || extracted) : (saved || extracted)
 
         const matchAccountType = (raw: string) =>
           ACCOUNT_TYPES.find(
@@ -410,7 +425,7 @@ export default function VendorRegistrationForm() {
         setLoading(false)
         return
       }
-      const updatedUser = { ...user, registration_status: 'Submitted' }
+      const updatedUser = { ...user, registration_status: 'SUBMITTED' }
       sessionStorage.setItem('vendor_user', JSON.stringify(updatedUser))
       setSubmitted(true)
       setTimeout(() => navigate('/vendor-registration/home'), 2000)

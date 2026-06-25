@@ -13,11 +13,11 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import VendorRegistration, VendorUser, VendorDocument, VendorProfile, VendorGST, VendorBankDetails, VendorContactDetails, VendorDocumentExtraction, VendorFieldChangeLog, VendorComparisonResult, VendorApprovalHistory, VendorNotification
+from .models import VendorRegistration, VendorUser, VendorDocument, VendorProfile, VendorGST, VendorBankDetails, VendorDocumentExtraction, VendorFieldChangeLog, VendorComparisonResult, VendorApprovalHistory, VendorNotification
 from .serializers import (
     RegisterRequestSerializer, LoginRequestSerializer, DocumentSerializer,
     RegistrationFormSerializer, VendorProfileSerializer, VendorGSTSerializer,
-    VendorBankDetailsSerializer, VendorContactDetailsSerializer,
+    VendorBankDetailsSerializer,
 )
 from .utils.password import generate_password, hash_password, verify_password
 from .ae_service import get_ae_token, execute_document_workflow, DOCUMENT_WORKFLOW_MAP, get_workflow_status
@@ -39,7 +39,7 @@ class RegisterView(APIView):
         pan_number = serializer.validated_data["pan_number"].upper()
         email      = serializer.validated_data["email"].lower()
 
-        if VendorRegistration.objects.filter(pan_number=pan_number).exists():
+        if VendorUser.objects.filter(pan_number=pan_number).exists():
             return Response(
                 {"detail": "A vendor with this PAN number is already registered."},
                 status=status.HTTP_409_CONFLICT,
@@ -53,22 +53,21 @@ class RegisterView(APIView):
 
         registration_no = generate_registration_no()
 
-        vendor_reg = VendorRegistration.objects.create(
-            registration_no=registration_no,
-            pan_number=pan_number,
-            email=email,
-            registration_status="Draft",
-        )
-
+        # VendorUser is created first, then VendorRegistration links to it
         plain_password = generate_password()
-        VendorUser.objects.create(
-            registration=vendor_reg,
+        vendor_user = VendorUser.objects.create(
+            pan_number=pan_number,
             email=email,
             password_hash=hash_password(plain_password),
             account_status="Active",
             must_change_password="Y",
-            failed_login_attempts=0,
-            created_by="SYSTEM",
+        )
+
+        VendorRegistration.objects.create(
+            registration_no=registration_no,
+            user=vendor_user,
+            registration_status="DRAFT",
+            current_stage="ACCOUNT_CREATION",
         )
 
         try:
@@ -96,15 +95,7 @@ class LoginView(APIView):
         password   = serializer.validated_data["password"]
 
         try:
-            vendor_reg = VendorRegistration.objects.get(pan_number=pan_number)
-        except VendorRegistration.DoesNotExist:
-            return Response(
-                {"detail": "Invalid PAN number or password."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        try:
-            vendor_user = vendor_reg.vendor_user
+            vendor_user = VendorUser.objects.get(pan_number=pan_number)
         except VendorUser.DoesNotExist:
             return Response(
                 {"detail": "Invalid PAN number or password."},
@@ -113,7 +104,7 @@ class LoginView(APIView):
 
         if vendor_user.account_status == "Locked":
             return Response(
-                {"detail": "Account locked due to too many failed attempts. Please contact support."},
+                {"detail": "Account locked. Please contact support."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -124,29 +115,25 @@ class LoginView(APIView):
             )
 
         if not verify_password(password, vendor_user.password_hash):
-            vendor_user.failed_login_attempts = (vendor_user.failed_login_attempts or 0) + 1
-            if vendor_user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
-                vendor_user.account_status = "Locked"
-                vendor_user.account_locked_date = timezone.now()
-            vendor_user.save()
             return Response(
                 {"detail": "Invalid PAN number or password."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        vendor_user.failed_login_attempts = 0
         vendor_user.last_login_date = timezone.now()
         vendor_user.save()
 
+        vendor_reg = vendor_user.registrations.order_by("-created_date").first()
+
         return Response({
             "message": "Login successful.",
-            "user_id":             vendor_user.user_id,
-            "registration_id":     vendor_reg.registration_id,
-            "registration_no":     vendor_reg.registration_no,
-            "vendor_name":         vendor_reg.vendor_name,
-            "email":               vendor_user.email,
+            "user_id":              vendor_user.user_id,
+            "registration_id":      vendor_reg.registration_id if vendor_reg else None,
+            "registration_no":      vendor_reg.registration_no if vendor_reg else None,
+            "email":                vendor_user.email,
             "must_change_password": vendor_user.must_change_password,
-            "registration_status": vendor_reg.registration_status,
+            "registration_status":  vendor_reg.registration_status if vendor_reg else None,
+            "current_stage":        vendor_reg.current_stage if vendor_reg else None,
         })
 
 
@@ -202,16 +189,17 @@ class DocumentUploadView(APIView):
             registration=vendor_reg, document_type=document_type
         ).first()
 
+        uploaded_by_val = str(request.data.get("uploaded_by") or "")
+
         if existing:
             old_abs = settings.MEDIA_ROOT / existing.file_path
             if old_abs.exists():
                 old_abs.unlink(missing_ok=True)
-            # Clear stale extraction rows so the new AE workflow starts fresh
             VendorDocumentExtraction.objects.filter(document=existing).delete()
             existing.file_name   = uploaded_file.name
             existing.file_path   = rel_path
-            existing.uploaded_by = request.data.get("uploaded_by")
-            existing.status      = "Pending"
+            existing.file_size   = uploaded_file.size
+            existing.uploaded_by = uploaded_by_val
             existing.save()
             doc = existing
         else:
@@ -220,9 +208,15 @@ class DocumentUploadView(APIView):
                 document_type = document_type,
                 file_name     = uploaded_file.name,
                 file_path     = rel_path,
-                uploaded_by   = request.data.get("uploaded_by"),
-                status        = "Pending",
+                file_size     = uploaded_file.size,
+                uploaded_by   = uploaded_by_val,
             )
+
+        # Advance registration status/stage on first document upload
+        if vendor_reg.registration_status == "DRAFT":
+            vendor_reg.registration_status = "DOCUMENT_UPLOADED"
+            vendor_reg.current_stage       = "DOCUMENT_UPLOAD"
+            vendor_reg.save(update_fields=["registration_status", "current_stage", "updated_date"])
 
         # Trigger AE T4 workflow if this document type has a mapped workflow
         ae_info = {}
@@ -292,18 +286,30 @@ class DocumentDownloadView(APIView):
 
 
 # Actions that trigger a vendor notification email
-_NOTIFY_ACTIONS = frozenset({'Approved', 'Rejected', 'Sent Back'})
+_NOTIFY_ACTIONS = frozenset({'APPROVED', 'REJECTED', 'SEND_BACK'})
 
 _NOTIFICATION_TYPE_MAP = {
-    'Approved':  'APPROVAL_NOTIFICATION',
-    'Rejected':  'REJECTION_NOTIFICATION',
-    'Sent Back': 'SENT_BACK_NOTIFICATION',
+    'APPROVED':  'APPROVAL_NOTIFICATION',
+    'REJECTED':  'REJECTION_NOTIFICATION',
+    'SEND_BACK': 'SENT_BACK_NOTIFICATION',
 }
 
 _NOTIFICATION_SUBJECT_MAP = {
-    'Approved':  "Congratulations! Your Vendor Registration {reg_no} has been Approved",
-    'Rejected':  "Vendor Registration {reg_no} — Application Not Approved",
-    'Sent Back': "Action Required: Vendor Registration {reg_no} Needs Corrections",
+    'APPROVED':  "Congratulations! Your Vendor Registration {reg_no} has been Approved",
+    'REJECTED':  "Vendor Registration {reg_no} — Application Not Approved",
+    'SEND_BACK': "Action Required: Vendor Registration {reg_no} Needs Corrections",
+}
+
+# Stage to set automatically for each finance action
+_ACTION_STAGE_MAP = {
+    'DRAFT':          'ACCOUNT_CREATION',
+    'DOCUMENT_UPLOADED': 'DOCUMENT_UPLOAD',
+    'SUBMITTED':      'FINANCE_REVIEW',
+    'UNDER_REVIEW':   'FINANCE_REVIEW',
+    'SEND_BACK':      'FORM_COMPLETION',
+    'RESUBMITTED':    'FINANCE_REVIEW',
+    'APPROVED':       'TALLY_SYNC',
+    'REJECTED':       'COMPLETED',
 }
 
 
@@ -320,9 +326,12 @@ def _send_and_log_notification(reg: VendorRegistration, action: str, remarks: st
     delivery_status = 'Failed'
 
     try:
+        vendor_email = reg.user.email if reg.user_id else ''
+        profile      = reg.profiles.first()
+        vendor_name  = (profile.vendor_name if profile else None) or vendor_email or 'Vendor'
         send_vendor_status_email(
-            to_email        = reg.email or '',
-            vendor_name     = reg.vendor_name or reg.email or 'Vendor',
+            to_email        = vendor_email,
+            vendor_name     = vendor_name,
             registration_no = reg.registration_no or '',
             action          = action,
             remarks         = remarks,
@@ -334,7 +343,7 @@ def _send_and_log_notification(reg: VendorRegistration, action: str, remarks: st
 
     VendorNotification.objects.create(
         registration      = reg,
-        recipient_email   = reg.email or '',
+        recipient_email   = reg.user.email if reg.user_id else '',
         notification_type = notification_type,
         subject           = subject,
         delivery_status   = delivery_status,
@@ -348,26 +357,28 @@ class VendorListView(APIView):
         from django.db.models import Count
         rows = (
             VendorRegistration.objects
-            .select_related('profile')
+            .select_related('user')
+            .prefetch_related('profiles', 'gst_details')
             .annotate(document_count=Count('documents'))
             .order_by('-submitted_date', '-created_date')
         )
         result = []
         for r in rows:
-            profile = getattr(r, 'profile', None)
+            profile = r.profiles.first()
+            gst     = r.gst_details.first()
             result.append({
                 'registration_id':    r.registration_id,
                 'registration_no':    r.registration_no or '',
                 'registration_status': r.registration_status,
-                'vendor_name':        r.vendor_name or '',
-                'pan_number':         r.pan_number or '',
-                'email':              r.email or '',
-                'mobile':             r.mobile or '',
+                'vendor_name':        (profile.vendor_name if profile else '') or '',
+                'pan_number':         (r.user.pan_number if r.user_id else '') or '',
+                'email':              (r.user.email if r.user_id else '') or '',
+                'mobile':             (profile.mobile if profile else '') or '',
                 'submitted_date':     r.submitted_date.strftime('%Y-%m-%d') if r.submitted_date else '',
                 'created_date':       r.created_date.strftime('%Y-%m-%d') if r.created_date else '',
                 'document_count':     r.document_count,
-                'gstin':              profile.gstin if profile else '',
-                'address':            profile.address if profile else '',
+                'gstin':              (gst.gstin if gst else '') or '',
+                'address':            (profile.address if profile else '') or '',
             })
         return Response(result)
 
@@ -379,44 +390,44 @@ class VendorDetailView(APIView):
         try:
             reg = (
                 VendorRegistration.objects
-                .select_related('profile')
-                .prefetch_related('bank_details', 'contact_details', 'documents')
+                .select_related('user')
+                .prefetch_related('profiles', 'gst_details', 'bank_details', 'documents')
                 .get(pk=registration_id)
             )
         except VendorRegistration.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        profile = getattr(reg, 'profile', None)
-        bank    = reg.bank_details.filter(is_primary=True).first()
-        contact = reg.contact_details.filter(is_primary=True).first()
+        profile = reg.profiles.first()
+        gst     = reg.gst_details.first()
+        bank    = reg.bank_details.first()
 
         return Response({
             'registration_id':    reg.registration_id,
             'registration_no':    reg.registration_no or '',
             'registration_status': reg.registration_status,
-            'vendor_name':        reg.vendor_name or '',
-            'pan_number':         reg.pan_number or '',
-            'email':              reg.email or '',
-            'mobile':             reg.mobile or '',
+            'vendor_name':        (profile.vendor_name if profile else '') or '',
+            'pan_number':         (reg.user.pan_number if reg.user_id else '') or '',
+            'email':              (reg.user.email if reg.user_id else '') or '',
+            'mobile':             (profile.mobile if profile else '') or '',
             'submitted_date':     reg.submitted_date.strftime('%Y-%m-%d') if reg.submitted_date else '',
             'created_date':       reg.created_date.strftime('%Y-%m-%d') if reg.created_date else '',
-            'gstin':              profile.gstin if profile else '',
-            'address':            profile.address if profile else '',
-            'goods_description':  profile.goods_service_description if profile else '',
-            'bank_name':          bank.bank_name if bank else '',
-            'bank_account_no':    bank.account_number if bank else '',
-            'bank_ifsc':          bank.ifsc_code if bank else '',
-            'bank_branch':        bank.branch_name if bank else '',
-            'account_type':       bank.account_type if bank else '',
-            'account_holder_name': bank.account_holder_name if bank else '',
-            'contact_person':     contact.contact_person if contact else '',
-            'designation':        contact.designation if contact else '',
+            'gstin':              (gst.gstin if gst else '') or '',
+            'address':            (profile.address if profile else '') or '',
+            'goods_description':  (profile.goods_service_description if profile else '') or '',
+            'bank_name':          (bank.bank_name if bank else '') or '',
+            'bank_account_no':    (bank.account_number if bank else '') or '',
+            'bank_ifsc':          (bank.ifsc_code if bank else '') or '',
+            'bank_branch':        (bank.branch_name if bank else '') or '',
+            'account_type':       (bank.account_type if bank else '') or '',
+            'account_holder_name': (bank.account_holder_name if bank else '') or '',
+            'contact_person':     (profile.contact_person if profile else '') or '',
+            'designation':        '',
             'documents': [
                 {
                     'document_id':   doc.document_id,
                     'document_type': doc.document_type,
                     'file_name':     doc.file_name,
-                    'status':        doc.status,
+                    'status':        'Uploaded',
                 }
                 for doc in reg.documents.all()
             ],
@@ -435,8 +446,10 @@ class VendorReviewView(APIView):
         action  = request.data.get('action', '').strip()
         remarks = request.data.get('remarks', '').strip()
 
-        valid_actions = ('Draft', 'Submitted', 'Under Review', 'Sent Back', 'Resubmitted',
-                         'Approved', 'Rejected', 'Tally Sync Pending', 'Completed')
+        valid_actions = (
+            'DRAFT', 'DOCUMENT_UPLOADED', 'SUBMITTED', 'UNDER_REVIEW',
+            'SEND_BACK', 'RESUBMITTED', 'APPROVED', 'REJECTED',
+        )
         if action not in valid_actions:
             return Response(
                 {'detail': f"action must be one of: {', '.join(valid_actions)}"},
@@ -444,10 +457,10 @@ class VendorReviewView(APIView):
             )
 
         reg.registration_status = action
-        if action == 'Approved':
+        reg.current_stage       = _ACTION_STAGE_MAP.get(action, reg.current_stage)
+        if action == 'APPROVED':
             reg.approved_date = timezone.now()
-        # Always store remarks (useful for Sent Back, optionally for others)
-        reg.review_remarks = remarks if remarks else None
+        reg.rejection_reason = remarks if remarks else None
         reg.save()
 
         VendorApprovalHistory.objects.create(
@@ -786,58 +799,46 @@ def _save_comparison_results(vendor_reg: 'VendorRegistration', d: dict) -> None:
     rows_to_create: list[VendorComparisonResult] = []
 
     for label, form_key, doc_spec in _COMPARISON_SPECS:
-        pan_val  = _get("PAN Card",                     doc_spec.get("PAN Card", []))
-        gst_val  = _get("GST Certificate",              doc_spec.get("GST Certificate", []))
-        coi_val  = _get("Certificate of Incorporation", doc_spec.get("Certificate of Incorporation", []))
-        msme_val = _get("MSME Certificate",             doc_spec.get("MSME Certificate", []))
-        bank_val = _get_bank(
-            doc_spec.get("Cancelled Cheque", []),
-            doc_spec.get("Bank Statement", []),
-        )
         form_val = (form_data.get(form_key) or None) if form_key else None
 
-        # Only save rows where at least 2 sources have data (meaningful comparison)
-        all_vals = [v for v in [pan_val, gst_val, bank_val, coi_val, msme_val, form_val] if v]
-        if len(all_vals) < 2:
-            continue
+        # One row per (field_name, document_type) — new documents can be added
+        # to doc_spec in _COMPARISON_SPECS without any schema change.
+        for doc_type, field_names in doc_spec.items():
+            doc_val = _get(doc_type, field_names)
+            if not doc_val:
+                continue
 
-        # Compute pairwise minimum similarity as the confidence score
-        unique_vals = list(dict.fromkeys(all_vals))  # deduplicate preserving order
-        if len(unique_vals) == 1:
-            result         = "Match"
-            confidence     = 100.00
-            remarks        = None
-        else:
-            min_sim = 1.0
-            for i in range(len(all_vals)):
-                for j in range(i + 1, len(all_vals)):
-                    min_sim = min(min_sim, _field_similarity(all_vals[i], all_vals[j]))
+            # Skip if neither side has a value for this pair
+            if not form_val and not doc_val:
+                continue
 
-            confidence = round(min_sim * 100, 2)
-
-            if min_sim == 1.0:
-                result  = "Match"
-                remarks = None
-            elif min_sim >= 0.70:
-                result  = "Partial Match"
-                remarks = "Values are similar but not identical across sources"
+            if form_val and doc_val:
+                sim        = _field_similarity(doc_val, form_val)
+                confidence = round(sim * 100, 2)
+                if sim == 1.0:
+                    result  = "Match"
+                    remarks = None
+                elif sim >= 0.70:
+                    result  = "Partial Match"
+                    remarks = "Values are similar but not identical"
+                else:
+                    result  = "Mismatch"
+                    remarks = "Values differ significantly"
             else:
-                result  = "Mismatch"
-                remarks = "Values differ significantly across sources"
+                result     = "No Form Value"
+                confidence = None
+                remarks    = "Form value not submitted"
 
-        rows_to_create.append(VendorComparisonResult(
-            registration        = vendor_reg,
-            field_name          = label,
-            pan_document_value  = pan_val,
-            gst_document_value  = gst_val,
-            bank_document_value = bank_val,
-            coi_document_value  = coi_val,
-            msme_document_value = msme_val,
-            form_value          = form_val,
-            comparison_result   = result,
-            confidence_score    = confidence,
-            remarks             = remarks,
-        ))
+            rows_to_create.append(VendorComparisonResult(
+                registration      = vendor_reg,
+                field_name        = label,
+                document_type     = doc_type,
+                document_value    = doc_val,
+                form_value        = form_val,
+                comparison_result = result,
+                confidence_score  = confidence,
+                remarks           = remarks,
+            ))
 
     if rows_to_create:
         VendorComparisonResult.objects.bulk_create(rows_to_create)
@@ -863,10 +864,12 @@ def _parse_address(full_address: str) -> dict:
     parts = [p.strip() for p in addr_part.split(", ")]
 
     if len(parts) >= 3:
-        state         = parts[-1]
-        city          = parts[-2]
-        address_line1 = parts[0]
-        address_line2 = ", ".join(parts[1:-2]) if len(parts) > 3 else ""
+        state  = parts[-1]
+        city   = parts[-2]
+        # Everything before city and state is address_line1 (joined back with commas)
+        # — address_line1 itself may contain commas so we cannot split it further
+        address_line1 = ", ".join(parts[:-2])
+        address_line2 = ""
     elif len(parts) == 2:
         state         = parts[-1]
         address_line1 = parts[0]
@@ -939,30 +942,30 @@ class RegistrationFormView(APIView):
         except VendorRegistration.DoesNotExist:
             return Response({"detail": "Invalid registration_id."}, status=status.HTTP_404_NOT_FOUND)
 
-        profile = getattr(vendor_reg, "profile", None)
-        gst     = vendor_reg.gst_details.filter(is_primary=True).first()
-        bank    = vendor_reg.bank_details.filter(is_primary=True).first()
-        contact = vendor_reg.contact_details.filter(is_primary=True).first()
+        profile = vendor_reg.profiles.first()
+        gst     = vendor_reg.gst_details.first()
+        bank    = vendor_reg.bank_details.first()
 
         response = Response({
             "registration_id":        vendor_reg.registration_id,
             "registration_status":    vendor_reg.registration_status,
-            "review_remarks":         vendor_reg.review_remarks or "",
-            "vendor_name":            vendor_reg.vendor_name or "",
-            "email":                  vendor_reg.email or "",
-            "phone":                  vendor_reg.mobile or "",
-            "pan":                    vendor_reg.pan_number or "",
-            "gstin":                  profile.gstin if profile else "",
-            "goods_description":      profile.goods_service_description if profile else "",
+            "current_stage":          vendor_reg.current_stage or "",
+            "review_remarks":         vendor_reg.rejection_reason or "",
+            "vendor_name":            (profile.vendor_name if profile else "") or "",
+            "email":                  (vendor_reg.user.email if vendor_reg.user_id else "") or "",
+            "phone":                  (profile.mobile if profile else "") or "",
+            "pan":                    (vendor_reg.user.pan_number if vendor_reg.user_id else "") or "",
+            "gstin":                  (gst.gstin if gst else "") or "",
+            "goods_description":      (profile.goods_service_description if profile else "") or "",
             **_parse_address(profile.address if profile else ""),
-            "state":                  gst.state_name if gst else "",
-            "bank_name":              bank.bank_name if bank else "",
-            "bank_branch":            bank.branch_name if bank else "",
-            "account_type":           bank.account_type if bank else "",
-            "ifsc":                   bank.ifsc_code if bank else "",
-            "account_number":         bank.account_number if bank else "",
-            "name_as_per_bank":       bank.account_holder_name if bank else "",
-            "contact_person_ae":      contact.contact_person if contact else "",
+            "state":                  (gst.state_name if gst else "") or "",
+            "bank_name":              (bank.bank_name if bank else "") or "",
+            "bank_branch":            (bank.branch_name if bank else "") or "",
+            "account_type":           (bank.account_type if bank else "") or "",
+            "ifsc":                   (bank.ifsc_code if bank else "") or "",
+            "account_number":         (bank.account_number if bank else "") or "",
+            "name_as_per_bank":       (bank.account_holder_name if bank else "") or "",
+            "contact_person_ae":      (profile.contact_person if profile else "") or "",
             "extracted_fields":       _build_extracted_fields(vendor_reg.registration_id),
             # Only extractions from documents re-uploaded after the last submission.
             # Frontend uses these to override saved values when the form is sent back.
@@ -975,6 +978,8 @@ class RegistrationFormView(APIView):
         return response
 
     def post(self, request):
+        from django.db import transaction
+
         serializer = RegistrationFormSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -988,40 +993,39 @@ class RegistrationFormView(APIView):
 
         # Capture previous DB values BEFORE any updates so the change log can
         # compare new submission against what the vendor previously saved.
-        is_resubmission = vendor_reg.registration_status == "Sent Back"
+        is_resubmission = vendor_reg.registration_status == "SEND_BACK"
         if is_resubmission:
-            _prev_bank = vendor_reg.bank_details.filter(is_primary=True).first()
-            _prev_profile = getattr(vendor_reg, "profile", None)
-            _prev_addr = _parse_address(_prev_profile.address if _prev_profile else "")
+            _prev_bank    = vendor_reg.bank_details.first()
+            _prev_profile = vendor_reg.profiles.first()
+            _prev_gst     = vendor_reg.gst_details.first()
+            _prev_addr    = _parse_address(_prev_profile.address if _prev_profile else "")
             _prev_db: dict[str, str] = {
-                "vendor_name":      vendor_reg.vendor_name or "",
-                "pan":              vendor_reg.pan_number or "",
-                "gstin":            (_prev_profile.gstin if _prev_profile else "") or "",
-                "bank_name":        (_prev_bank.bank_name if _prev_bank else "") or "",
-                "bank_branch":      (_prev_bank.branch_name if _prev_bank else "") or "",
-                "account_type":     (_prev_bank.account_type if _prev_bank else "") or "",
-                "ifsc":             ((_prev_bank.ifsc_code if _prev_bank else "") or "").upper(),
-                "account_number":   (_prev_bank.account_number if _prev_bank else "") or "",
-                "name_as_per_bank": (_prev_bank.account_holder_name if _prev_bank else "") or "",
-                "address_line1":    _prev_addr.get("address_line1", ""),
-                "city":             _prev_addr.get("city", ""),
-                "state":            _prev_addr.get("state", ""),
-                "pincode":          _prev_addr.get("pincode", ""),
+                "vendor_name":      (_prev_profile.vendor_name if _prev_profile else "") or "",
+                "pan":              (vendor_reg.user.pan_number if vendor_reg.user_id else "") or "",
+                "gstin":            (_prev_gst.gstin if _prev_gst else "") or "",
+                # Profile fields (captured before profile is updated in step 3)
+                "phone":             (_prev_profile.mobile if _prev_profile else "") or "",
+                "email":             (vendor_reg.user.email if vendor_reg.user_id else "") or "",
+                "goods_description": (_prev_profile.goods_service_description if _prev_profile else "") or "",
+                "contact_person_ae": (_prev_profile.contact_person if _prev_profile else "") or "",
+                # Bank fields
+                "bank_name":         (_prev_bank.bank_name if _prev_bank else "") or "",
+                "bank_branch":       (_prev_bank.branch_name if _prev_bank else "") or "",
+                "account_type":      (_prev_bank.account_type if _prev_bank else "") or "",
+                "ifsc":              ((_prev_bank.ifsc_code if _prev_bank else "") or "").upper(),
+                "account_number":    (_prev_bank.account_number if _prev_bank else "") or "",
+                "name_as_per_bank":  (_prev_bank.account_holder_name if _prev_bank else "") or "",
+                # Address fields
+                "address_line1":     _prev_addr.get("address_line1", ""),
+                "city":              _prev_addr.get("city", ""),
+                "state":             _prev_addr.get("state", ""),
+                "pincode":           _prev_addr.get("pincode", ""),
             }
         else:
             _prev_db = {}
 
-        # 1. Update core registration fields
-        vendor_reg.vendor_name    = d["vendor_name"]
-        vendor_reg.email          = d["email"]
-        vendor_reg.mobile         = d["phone"]
-        # Sent Back → Resubmitted; first-time submit → Submitted
-        vendor_reg.registration_status = (
-            "Resubmitted" if vendor_reg.registration_status == "Sent Back" else "Submitted"
-        )
-        vendor_reg.submitted_date = timezone.now()
-        vendor_reg.review_remarks = None   # clear remarks on resubmit
-        vendor_reg.save()
+        # Compute new status in memory — only saved to DB after all related records succeed
+        new_status = "RESUBMITTED" if vendor_reg.registration_status == "SEND_BACK" else "SUBMITTED"
 
         # 2. Build combined address string
         parts = [d["address_line1"]]
@@ -1030,93 +1034,98 @@ class RegistrationFormView(APIView):
         parts.extend([d["city"], d["state"]])
         full_address = ", ".join(parts) + " - " + d["pincode"]
 
-        # 3. Upsert VendorProfile (one-to-one)
+        # 3. Upsert VendorProfile
         VendorProfile.objects.update_or_create(
             registration=vendor_reg,
             defaults={
+                "vendor_name":               d["vendor_name"],
                 "address":                   full_address,
                 "goods_service_description": d["goods_description"],
-                "gstin":                     d["gstin"].upper(),
+                "contact_person":            d["contact_person_ae"],
+                "email":                     d.get("email", ""),
+                "mobile":                    d.get("phone", ""),
             },
         )
 
         # 4. Upsert primary VendorGST record
         gstin      = d["gstin"].upper()
         state_code = gstin[:2] if len(gstin) >= 2 else None
-        existing_gst = vendor_reg.gst_details.filter(is_primary=True).first()
-        if existing_gst:
-            existing_gst.gst_number         = gstin
-            existing_gst.state_code         = state_code
-            existing_gst.state_name         = d["state"]
-            existing_gst.registered_address = full_address
-            existing_gst.save()
-        else:
-            VendorGST.objects.create(
-                registration       = vendor_reg,
-                gst_number         = gstin,
-                state_code         = state_code,
-                state_name         = d["state"],
-                registered_address = full_address,
-                is_primary         = True,
-                status             = "Active",
-            )
+        VendorGST.objects.update_or_create(
+            registration=vendor_reg,
+            defaults={
+                "gstin":       gstin,
+                "legal_name":  d["vendor_name"],
+                "state_code":  state_code,
+                "state_name":  d["state"],
+                "gst_address": full_address,
+                "is_primary":  "Y",
+            },
+        )
 
         # 5. Replace primary bank record (delete + re-create to avoid unique conflicts)
-        vendor_reg.bank_details.filter(is_primary=True).delete()
+        vendor_reg.bank_details.filter(is_primary="Y").delete()
         VendorBankDetails.objects.create(
             registration        = vendor_reg,
             bank_name           = d["bank_name"],
+            branch_name         = d.get("bank_branch", "") or None,
             account_holder_name = d["name_as_per_bank"],
             account_number      = d["account_number"],
             ifsc_code           = d["ifsc"].upper(),
-            branch_name         = d["bank_branch"],
             account_type        = d["account_type"],
-            is_primary          = True,
-            status              = "Active",
+            is_primary          = "Y",
         )
 
-        # 6. Replace primary contact record
-        vendor_reg.contact_details.filter(is_primary=True).delete()
-        VendorContactDetails.objects.create(
-            registration   = vendor_reg,
-            contact_person = d["contact_person_ae"],
-            designation    = "AE Internal Sponsor",
-            is_primary     = True,
-        )
+        # 1. Save registration status — done here (after profile/GST/bank) so a failure
+        #    in those steps doesn't leave status=SUBMITTED with missing related data
+        vendor_reg.registration_status = new_status
+        vendor_reg.current_stage       = "FINANCE_REVIEW"
+        vendor_reg.submitted_date      = timezone.now()
+        vendor_reg.rejection_reason    = None
+        vendor_reg.save()
 
-        # 7. Log all fields where the vendor changed a value from the baseline.
+        # 6. Log all fields where the vendor changed a value from the baseline.
         #    First submission  → baseline is the OCR-extracted value.
         #    Resubmission      → baseline is the previously saved DB value;
         #                        fall back to OCR if no DB value existed for that field.
         _LOG_FIELDS: dict[str, str] = {
-            "vendor_name":      "Vendor Name",
-            "pan":              "PAN Number",
-            "gstin":            "GSTIN",
-            "bank_name":        "Bank Name",
-            "bank_branch":      "Bank Branch",
-            "account_type":     "Account Type",
-            "ifsc":             "IFSC Code",
-            "account_number":   "Account Number",
-            "name_as_per_bank": "Name as per Bank",
-            "address_line1":    "Address Line 1",
-            "city":             "City",
-            "state":            "State",
-            "pincode":          "PIN Code",
+            "vendor_name":       "Vendor Name",
+            "email":             "Email Address",
+            "phone":             "Phone / Mobile",
+            "pan":               "PAN Number",
+            "gstin":             "GSTIN",
+            "goods_description": "Goods / Services",
+            "address_line1":     "Address Line 1",
+            "address_line2":     "Address Line 2",
+            "city":              "City",
+            "state":             "State",
+            "pincode":           "PIN Code",
+            "bank_name":         "Bank Name",
+            "bank_branch":       "Bank Branch",
+            "account_type":      "Account Type",
+            "ifsc":              "IFSC Code",
+            "account_number":    "Account Number",
+            "name_as_per_bank":  "Name as per Bank",
+            "contact_person_ae": "AE Contact Person",
         }
         _submitted_values: dict[str, str] = {
-            "vendor_name":      d.get("vendor_name", "") or "",
-            "pan":              d.get("pan", "") or "",
-            "gstin":            d.get("gstin", "") or "",
-            "bank_name":        d.get("bank_name", "") or "",
-            "bank_branch":      d.get("bank_branch", "") or "",
-            "account_type":     d.get("account_type", "") or "",
-            "ifsc":             (d.get("ifsc", "") or "").upper(),
-            "account_number":   d.get("account_number", "") or "",
-            "name_as_per_bank": d.get("name_as_per_bank", "") or "",
-            "address_line1":    d.get("address_line1", "") or "",
-            "city":             d.get("city", "") or "",
-            "state":            d.get("state", "") or "",
-            "pincode":          d.get("pincode", "") or "",
+            "vendor_name":       d.get("vendor_name", "") or "",
+            "email":             d.get("email", "") or "",
+            "phone":             d.get("phone", "") or "",
+            "pan":               d.get("pan", "") or "",
+            "gstin":             d.get("gstin", "") or "",
+            "goods_description": d.get("goods_description", "") or "",
+            "address_line1":     d.get("address_line1", "") or "",
+            "address_line2":     d.get("address_line2", "") or "",
+            "city":              d.get("city", "") or "",
+            "state":             d.get("state", "") or "",
+            "pincode":           d.get("pincode", "") or "",
+            "bank_name":         d.get("bank_name", "") or "",
+            "bank_branch":       d.get("bank_branch", "") or "",
+            "account_type":      d.get("account_type", "") or "",
+            "ifsc":              (d.get("ifsc", "") or "").upper(),
+            "account_number":    d.get("account_number", "") or "",
+            "name_as_per_bank":  d.get("name_as_per_bank", "") or "",
+            "contact_person_ae": d.get("contact_person_ae", "") or "",
         }
         extracted = _build_extracted_fields(vendor_reg.registration_id)
         change_logs = []
@@ -1127,20 +1136,20 @@ class RegistrationFormView(APIView):
                 continue
 
             if is_resubmission:
-                # Use previous saved DB value as the original; fall back to OCR
+                # _prev_db is built at the top of the method before any updates
                 prev_val = (_prev_db.get(form_key) or "").strip()
                 original = prev_val or ocr_val
             else:
-                # First submission: compare against OCR extracted value only
                 original = ocr_val
 
-            if original and original.upper() != sub_val.upper():
+            # Log if: field was submitted AND (no baseline exists OR value differs from baseline)
+            if sub_val and (not original or original.upper() != sub_val.upper()):
                 change_logs.append(VendorFieldChangeLog(
                     registration   = vendor_reg,
                     field_name     = display_name,
-                    original_value = original,
+                    original_value = original or None,
                     modified_value = sub_val,
-                    changed_by     = vendor_reg.email or "",
+                    changed_by     = vendor_reg.user.email if vendor_reg.user_id else "",
                 ))
         if change_logs:
             VendorFieldChangeLog.objects.bulk_create(change_logs)
@@ -1152,15 +1161,16 @@ class RegistrationFormView(APIView):
             logger.error("Comparison result save failed for reg %s: %s", vendor_reg.registration_id, exc)
 
         # 9. Record vendor action in approval history
+        vendor_email = vendor_reg.user.email if vendor_reg.user_id else "Vendor"
         VendorApprovalHistory.objects.create(
             registration = vendor_reg,
-            action       = vendor_reg.registration_status,   # "Submitted" or "Resubmitted"
+            action       = vendor_reg.registration_status,
             comments     = None,
-            action_by    = vendor_reg.email or "Vendor",
+            action_by    = vendor_email,
         )
 
         return Response(
-            {"message": "Registration form submitted successfully.", "registration_status": "Submitted"},
+            {"message": "Registration form submitted successfully.", "registration_status": vendor_reg.registration_status},
             status=status.HTTP_200_OK,
         )
 
@@ -1267,20 +1277,21 @@ class FormAnalysisView(APIView):
         except VendorRegistration.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        profile = getattr(vendor_reg, "profile", None)
-        bank    = vendor_reg.bank_details.filter(is_primary=True).first()
+        profile = vendor_reg.profiles.first()
+        gst     = vendor_reg.gst_details.first()
+        bank    = vendor_reg.bank_details.first()
         parsed  = _parse_address(profile.address if profile else "")
 
         submitted = {
-            "vendor_name":      vendor_reg.vendor_name or "",
-            "pan":              vendor_reg.pan_number or "",
-            "gstin":            profile.gstin if profile else "",
-            "bank_name":        bank.bank_name if bank else "",
-            "bank_branch":      bank.branch_name if bank else "",
-            "account_type":     bank.account_type if bank else "",
-            "ifsc":             bank.ifsc_code if bank else "",
-            "account_number":   bank.account_number if bank else "",
-            "name_as_per_bank": bank.account_holder_name if bank else "",
+            "vendor_name":      (profile.vendor_name if profile else "") or "",
+            "pan":              (vendor_reg.user.pan_number if vendor_reg.user_id else "") or "",
+            "gstin":            (gst.gstin if gst else "") or "",
+            "bank_name":        (bank.bank_name if bank else "") or "",
+            "bank_branch":      (bank.branch_name if bank else "") or "",
+            "account_type":     (bank.account_type if bank else "") or "",
+            "ifsc":             (bank.ifsc_code if bank else "") or "",
+            "account_number":   (bank.account_number if bank else "") or "",
+            "name_as_per_bank": (bank.account_holder_name if bank else "") or "",
             "address_line1":    parsed["address_line1"],
             "city":             parsed["city"],
             "state":            parsed["state"],

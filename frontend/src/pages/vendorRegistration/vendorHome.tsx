@@ -22,6 +22,7 @@ import EmailOutlinedIcon from '@mui/icons-material/EmailOutlined'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 import ReplyOutlinedIcon from '@mui/icons-material/ReplyOutlined'
+import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
 import type { SvgIconComponent } from '@mui/icons-material'
 
 const theme = createTheme({
@@ -148,7 +149,7 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
         })}
       </Box>
 
-      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end' }}>
+      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end', backgroundColor: 'rgba(255,255,255,0.05)' }}>
         <IconButton onClick={onToggle} size="small" sx={{ color: 'rgba(255,255,255,0.4)', '&:hover': { backgroundColor: 'rgba(255,255,255,0.08)', color: '#fff' } }}>
           {collapsed ? <ChevronRightIcon fontSize="small" /> : <ChevronLeftIcon fontSize="small" />}
         </IconButton>
@@ -241,11 +242,11 @@ function OnboardingStep({ step, index, total }: OnboardingStepProps) {
       </Box>
 
       <Box sx={{ flex: 1, pb: isLast ? 0 : 2 }}>
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid', borderColor: step.done ? '#FFD4B0' : '#E5E7EB', backgroundColor: step.done ? '#FFF8F3' : '#FAFAFA' }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" gap={1}>
-            <Box>
+        <Paper elevation={0} sx={{ p: 2.5, border: '1px solid', borderColor: step.done ? '#FFD4B0' : '#E5E7EB', backgroundColor: step.done ? '#FFF8F3' : '#FAFAFA' }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" gap={3}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" fontWeight={700} color={step.done ? '#CC5500' : 'text.primary'}>{step.label}</Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, display: 'block' }}>{step.description}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', lineHeight: 1.5 }}>{step.description}</Typography>
             </Box>
             {step.done ? (
               <Stack direction="row" alignItems="center" spacing={1} flexShrink={0}>
@@ -253,14 +254,14 @@ function OnboardingStep({ step, index, total }: OnboardingStepProps) {
                 {step.viewAction && (
                   <Button size="small" variant="outlined" startIcon={<VisibilityOutlinedIcon sx={{ fontSize: '14px !important' }} />}
                     onClick={() => navigate(step.viewAction!)}
-                    sx={{ fontSize: 12, py: 0.7, px: 1.5, borderColor: '#FFD4B0', color: '#FF6B00', '&:hover': { borderColor: '#FF6B00', backgroundColor: '#FFF5EE' } }}>
+                    sx={{ fontSize: 12, py: 0.7, px: 1.5, flexShrink: 0, borderColor: '#FFD4B0', color: '#FF6B00', '&:hover': { borderColor: '#FF6B00', backgroundColor: '#FFF5EE' } }}>
                     {step.viewLabel || 'View'}
                   </Button>
                 )}
               </Stack>
             ) : step.action ? (
               <Button size="small" variant="contained" endIcon={<ArrowForwardIcon sx={{ fontSize: '14px !important' }} />} onClick={() => navigate(step.action!)}
-                sx={{ fontSize: 12, py: 0.7, px: 2, flexShrink: 0, background: 'linear-gradient(135deg, #FF6B00, #FF8C33)', boxShadow: '0 2px 8px rgba(255,107,0,0.25)', '&:hover': { background: 'linear-gradient(135deg, #CC5500, #FF6B00)' } }}>
+                sx={{ fontSize: 12, py: 0.7, px: 2.5, flexShrink: 0, whiteSpace: 'nowrap', background: 'linear-gradient(135deg, #FF6B00, #FF8C33)', boxShadow: '0 2px 8px rgba(255,107,0,0.25)', '&:hover': { background: 'linear-gradient(135deg, #CC5500, #FF6B00)' } }}>
                 {step.actionLabel}
               </Button>
             ) : (
@@ -305,7 +306,7 @@ export default function VendorHome() {
   const user: VendorUser = JSON.parse(sessionStorage.getItem('vendor_user') || '{}')
 
   // Live status + remarks — starts from cached session, refreshed on every page load
-  const [liveStatus, setLiveStatus]       = useState<string>(user.registration_status || 'Draft')
+  const [liveStatus, setLiveStatus]       = useState<string>(user.registration_status || 'DRAFT')
   const [reviewRemarks, setReviewRemarks] = useState('')
 
   useEffect(() => {
@@ -341,8 +342,8 @@ export default function VendorHome() {
       .catch(() => setUploadedDocCount(0))
   }, [user.registration_id])
 
-  const isSentBack   = liveStatus === 'Sent Back'
-  const isApproved   = liveStatus === 'Approved'
+  const isSentBack   = liveStatus === 'SEND_BACK'
+  const isApproved   = liveStatus === 'APPROVED'
 
   const ONBOARDING_STEPS: OnboardingStepData[] = [
     {
@@ -366,8 +367,7 @@ export default function VendorHome() {
     {
       label: 'Complete Registration Form',
       description: 'Provide your business details, PAN, GSTIN, bank account information, and internal reference.',
-      // When sent back, show as pending so vendor knows they must re-edit and resubmit
-      done: !isSentBack && ['Submitted', 'Under Review', 'Resubmitted', 'Approved', 'Rejected', 'Tally Sync Pending', 'Completed'].includes(liveStatus),
+      done: !isSentBack && ['SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'APPROVED', 'REJECTED'].includes(liveStatus),
       action: '/vendor-registration/form',
       actionLabel: isSentBack ? 'Edit & Resubmit' : 'Fill Form',
       viewAction: '/vendor-registration/form',
@@ -419,6 +419,32 @@ export default function VendorHome() {
                 ) : (
                   <Box sx={{ px: 2.5, py: 1.5, backgroundColor: '#FFFBEB' }}>
                     <Typography sx={{ fontSize: 12.5, color: '#B45309' }}>Please review your documents and registration form, correct any issues, and resubmit.</Typography>
+                  </Box>
+                )}
+              </Paper>
+            )}
+
+            {liveStatus === 'REJECTED' && (
+              <Paper elevation={0} sx={{ mb: 3, border: '1px solid #FCA5A5', borderRadius: 3, overflow: 'hidden' }}>
+                <Box sx={{ px: 2.5, py: 1.5, backgroundColor: '#FEE2E2', borderBottom: '1px solid #FCA5A5', display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Box sx={{ width: 32, height: 32, borderRadius: 2, backgroundColor: '#FEE2E2', border: '1px solid #FCA5A5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <CancelOutlinedIcon sx={{ color: '#DC2626', fontSize: 18 }} />
+                  </Box>
+                  <Box>
+                    <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#991B1B' }}>Application Rejected</Typography>
+                    <Typography sx={{ fontSize: 11.5, color: '#B91C1C' }}>Your vendor registration application has been rejected by the finance team.</Typography>
+                  </Box>
+                </Box>
+                {reviewRemarks ? (
+                  <Box sx={{ px: 2.5, py: 2, backgroundColor: '#FFF5F5' }}>
+                    <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.8, mb: 1 }}>Reason from Finance Team</Typography>
+                    <Box sx={{ px: 2, py: 1.5, backgroundColor: '#FEE2E2', borderRadius: 2, border: '1px solid #FCA5A5', borderLeft: '4px solid #DC2626' }}>
+                      <Typography sx={{ fontSize: 13, color: '#991B1B', lineHeight: 1.6, fontStyle: 'italic' }}>"{reviewRemarks}"</Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Box sx={{ px: 2.5, py: 1.5, backgroundColor: '#FFF5F5' }}>
+                    <Typography sx={{ fontSize: 12.5, color: '#B91C1C' }}>Please contact support for more information.</Typography>
                   </Box>
                 )}
               </Paper>

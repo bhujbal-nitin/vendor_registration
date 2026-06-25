@@ -17,7 +17,6 @@ import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined'
 import LogoutIcon from '@mui/icons-material/Logout'
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone'
-import AccountCircleOutlinedIcon from '@mui/icons-material/AccountCircleOutlined'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import SearchIcon from '@mui/icons-material/Search'
@@ -28,7 +27,6 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
-import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined'
 import FingerprintIcon from '@mui/icons-material/Fingerprint'
 import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined'
 import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlined'
@@ -82,11 +80,11 @@ const theme = createTheme({
 const SIDEBAR_FULL = 240
 const SIDEBAR_MINI = 64
 
-type SectionId = 'dashboard' | 'registrations' | 'approvals' | 'documents' | 'reports'
+type SectionId = 'dashboard' | 'registrations' | 'approvals' | 'documents'
 
 // All statuses the system can produce
-type RegistrationStatus = 'Draft' | 'Submitted' | 'Under Review' | 'Sent Back' | 'Resubmitted' |
-  'Approved' | 'Rejected' | 'Tally Sync Pending' | 'Completed'
+type RegistrationStatus = 'DRAFT' | 'DOCUMENT_UPLOADED' | 'SUBMITTED' | 'UNDER_REVIEW' |
+  'SEND_BACK' | 'RESUBMITTED' | 'APPROVED' | 'REJECTED'
 
 // ── API Types ─────────────────────────────────────────────────────────────
 interface ApiRegistration {
@@ -145,31 +143,29 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'registrations', label: 'All Registrations', Icon: PeopleAltOutlinedIcon },
   { id: 'approvals',     label: 'Pending Approvals', Icon: PendingActionsOutlinedIcon },
   { id: 'documents',     label: 'Document Review',   Icon: FolderOpenOutlinedIcon },
-  { id: 'reports',       label: 'Reports',           Icon: AssessmentOutlinedIcon },
 ]
 
-const STATUS_CFG: Record<string, { bg: string; color: string; border: string }> = {
-  Draft:               { bg: '#F3F4F6', color: '#6B7280',  border: '#D1D5DB' },
-  Submitted:           { bg: '#FFF8F3', color: '#FF6B00',  border: '#FFD4B0' },
-  'Under Review':      { bg: '#FFF8F3', color: '#D97706',  border: '#FDE68A' },
-  'Sent Back':         { bg: '#FFF5F5', color: '#C2410C',  border: '#FDBA74' },
-  Resubmitted:         { bg: '#F0F7FF', color: '#2563EB',  border: '#BFDBFE' },
-  Approved:            { bg: '#F0FFF4', color: '#16A34A',  border: '#BBF7D0' },
-  Rejected:            { bg: '#FFF5F5', color: '#DC2626',  border: '#FCA5A5' },
-  'Tally Sync Pending':{ bg: '#F5F3FF', color: '#7C3AED',  border: '#DDD6FE' },
-  Completed:           { bg: '#ECFDF5', color: '#059669',  border: '#6EE7B7' },
+const STATUS_CFG: Record<string, { bg: string; color: string; border: string; label: string }> = {
+  DRAFT:             { bg: '#F3F4F6', color: '#6B7280',  border: '#D1D5DB', label: 'Draft' },
+  DOCUMENT_UPLOADED: { bg: '#EFF6FF', color: '#2563EB',  border: '#BFDBFE', label: 'Documents Uploaded' },
+  SUBMITTED:         { bg: '#FFF8F3', color: '#FF6B00',  border: '#FFD4B0', label: 'Submitted' },
+  UNDER_REVIEW:      { bg: '#FFFBEB', color: '#D97706',  border: '#FDE68A', label: 'Under Review' },
+  SEND_BACK:         { bg: '#FFF5F5', color: '#C2410C',  border: '#FDBA74', label: 'Sent Back' },
+  RESUBMITTED:       { bg: '#F0F7FF', color: '#2563EB',  border: '#BFDBFE', label: 'Resubmitted' },
+  APPROVED:          { bg: '#F0FFF4', color: '#16A34A',  border: '#BBF7D0', label: 'Approved' },
+  REJECTED:          { bg: '#FFF5F5', color: '#DC2626',  border: '#FCA5A5', label: 'Rejected' },
 }
 
 function StatusChip({ status }: { status: string }) {
-  const c = STATUS_CFG[status] ?? STATUS_CFG.Draft
+  const c = STATUS_CFG[status] ?? STATUS_CFG.DRAFT
   return (
-    <Chip label={status} size="small"
+    <Chip label={c?.label ?? status} size="small"
       sx={{ backgroundColor: c.bg, color: c.color, border: `1px solid ${c.border}`, fontWeight: 700, fontSize: '0.72rem', height: 22 }} />
   )
 }
 
 // Statuses that need a finance review action
-const PENDING_REVIEW_STATUSES: RegistrationStatus[] = ['Submitted', 'Resubmitted']
+const PENDING_REVIEW_STATUSES: RegistrationStatus[] = ['SUBMITTED', 'RESUBMITTED']
 
 // ── Sidebar ───────────────────────────────────────────────────────────────
 function Sidebar({ active, onSelect, collapsed, onToggle, pendingCount }: {
@@ -241,7 +237,7 @@ function Sidebar({ active, onSelect, collapsed, onToggle, pendingCount }: {
         </Box>
       )}
 
-      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end' }}>
+      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', p: 1.25, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end', backgroundColor: 'rgba(255,255,255,0.05)' }}>
         <IconButton onClick={onToggle} size="small" sx={{ color: 'rgba(255,255,255,0.4)', '&:hover': { backgroundColor: 'rgba(255,255,255,0.08)', color: '#fff' } }}>
           {collapsed ? <ChevronRightIcon fontSize="small" /> : <ChevronLeftIcon fontSize="small" />}
         </IconButton>
@@ -292,14 +288,6 @@ function TopBar({ title, subtitle, onRefresh, refreshing }: {
             <Typography variant="body2" fontWeight={700}>Finance Admin</Typography>
             <Typography variant="caption" color="text.secondary">finance@automationedge.ai</Typography>
           </Box>
-          <MenuItem onClick={() => setAnchorEl(null)} sx={{ gap: 1.5, py: 1.2 }}>
-            <AccountCircleOutlinedIcon fontSize="small" sx={{ color: '#FF6B00' }} />
-            <Typography variant="body2">My Profile</Typography>
-          </MenuItem>
-          <MenuItem onClick={() => setAnchorEl(null)} sx={{ gap: 1.5, py: 1.2 }}>
-            <AdminPanelSettingsOutlinedIcon fontSize="small" sx={{ color: '#FF6B00' }} />
-            <Typography variant="body2">Settings</Typography>
-          </MenuItem>
           <Divider />
           <MenuItem onClick={() => navigate('/vendor-registration')} sx={{ gap: 1.5, py: 1.2 }}>
             <LogoutIcon fontSize="small" sx={{ color: '#DC2626' }} />
@@ -623,9 +611,9 @@ function VendorDetailDialog({ registrationId, open, onClose }: {
       .finally(() => setLoading(false))
   }, [open, registrationId])
 
-  const handleViewDoc = async (doc: ApiDocument) => {
-    // Clicking the already-selected chip toggles the preview off
-    if (selectedDoc?.document_id === doc.document_id && activeView === 'docs') {
+  const handleViewDoc = async (doc: ApiDocument, allowToggle = true) => {
+    // Chips toggle off when the same doc is clicked again; FieldRow eye-buttons never toggle off
+    if (allowToggle && selectedDoc?.document_id === doc.document_id && activeView === 'docs') {
       setSelectedDoc(null)
       setPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
       setPreviewError('')
@@ -668,7 +656,7 @@ function VendorDetailDialog({ registrationId, open, onClose }: {
   // Returns a view-handler only when the source document is uploaded
   const docViewFor = (docType: string) => {
     const doc = docMap[docType]
-    return doc ? () => handleViewDoc(doc) : undefined
+    return doc ? () => handleViewDoc(doc, false) : undefined
   }
 
   return (
@@ -733,7 +721,7 @@ function VendorDetailDialog({ registrationId, open, onClose }: {
               </Stack>
               <Paper elevation={0} sx={{ p: 1.5, mb: 1.75, border: '1px solid #F3F4F6', borderRadius: 2 }}>
                 <FieldRow label="Vendor Name"      value={detail.vendor_name} onView={docViewFor('Certificate of Incorporation')} />
-                <FieldRow label="Address"          value={detail.address} />
+                <FieldRow label="Address"          value={detail.address} onView={docViewFor('MSME Certificate')} />
                 <FieldRow label="Goods / Services" value={detail.goods_description} />
               </Paper>
 
@@ -756,7 +744,6 @@ function VendorDetailDialog({ registrationId, open, onClose }: {
               </Stack>
               <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #F3F4F6', borderRadius: 2 }}>
                 <FieldRow label="Contact Person" value={detail.contact_person} />
-                <FieldRow label="Designation"    value={detail.designation} />
               </Paper>
             </Box>
 
@@ -1167,26 +1154,14 @@ function DashboardSection({ registrations, onNavigate }: {
 }) {
   const total    = registrations.length
   const pending  = registrations.filter((r) => PENDING_REVIEW_STATUSES.includes(r.registration_status)).length
-  const approved = registrations.filter((r) => r.registration_status === 'Approved' || r.registration_status === 'Completed').length
-  const rejected = registrations.filter((r) => r.registration_status === 'Rejected').length
-  const recent   = registrations.filter((r) => PENDING_REVIEW_STATUSES.includes(r.registration_status)).slice(0, 5)
+  const approved = registrations.filter((r) => r.registration_status === 'APPROVED').length
+  const rejected = registrations.filter((r) => r.registration_status === 'REJECTED').length
+  const recent   = registrations.filter((r) => PENDING_REVIEW_STATUSES.includes(r.registration_status))
+  const [dashPage, setDashPage] = useState(0)
+  const dashRpp = 5
 
   return (
     <Stack spacing={3}>
-      <Paper elevation={0} sx={{ p: { xs: 3, sm: 4 }, background: 'linear-gradient(135deg,#FF6B00 0%,#FF8C33 60%,#FFA84D 100%)', border: 'none', position: 'relative', overflow: 'hidden' }}>
-        <Box sx={{ position: 'absolute', width: 260, height: 260, borderRadius: '50%', background: 'rgba(255,255,255,0.07)', top: -80, right: -60 }} />
-        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={2}>
-          <Box>
-            <Typography sx={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, mb: 0.5 }}>Welcome back</Typography>
-            <Typography variant="h5" sx={{ color: '#fff' }}>Finance Admin Dashboard</Typography>
-            <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, mt: 0.5 }}>Review vendor registrations, verify documents, and approve applications.</Typography>
-          </Box>
-          <Button variant="contained" startIcon={<PendingActionsOutlinedIcon />} onClick={() => onNavigate('approvals')}
-            sx={{ backgroundColor: '#fff', color: '#FF6B00', fontWeight: 700, px: 3, flexShrink: 0, '&:hover': { backgroundColor: '#FFF5EE' }, boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}>
-            {pending} Pending Approval{pending !== 1 ? 's' : ''}
-          </Button>
-        </Stack>
-      </Paper>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} flexWrap="wrap">
         <InfoCard label="Total Registrations" value={total}    icon={PeopleAltOutlinedIcon}      color="#FF6B00" />
@@ -1208,20 +1183,17 @@ function DashboardSection({ registrations, onNavigate }: {
           <TableContainer>
             <Table size="small">
               <TableHead>
-                <TableRow>{['Reg. No.', 'Vendor Name', 'PAN', 'Email', 'Submitted', 'Docs', 'Action'].map((h) => <TableCell key={h}>{h}</TableCell>)}</TableRow>
+                <TableRow>{['Reg. No.', 'Vendor', 'PAN', 'Email', 'Submitted', 'Docs', 'Action'].map((h) => <TableCell key={h} sx={{ fontSize: 12 }}>{h}</TableCell>)}</TableRow>
               </TableHead>
               <TableBody>
-                {recent.map((r) => (
+                {recent.slice(dashPage * dashRpp, dashPage * dashRpp + dashRpp).map((r) => (
                   <TableRow key={r.registration_id} hover sx={{ '&:hover': { backgroundColor: '#FFF8F3' } }}>
-                    <TableCell><Typography variant="caption" fontWeight={700} color="#FF6B00" sx={{ fontFamily: 'monospace' }}>{r.registration_no}</Typography></TableCell>
-                    <TableCell>
-                      <Stack direction="row" alignItems="center" spacing={1.5}>
-                        <Avatar sx={{ width: 26, height: 26, fontSize: 11, fontWeight: 700, background: 'linear-gradient(135deg,#FF6B00,#FF8C33)' }}>{r.vendor_name?.charAt(0) || '?'}</Avatar>
-                        <Typography variant="body2" fontWeight={600}>{r.vendor_name || '—'}</Typography>
-                      </Stack>
+                    <TableCell><Typography variant="caption" sx={{ fontWeight: 700, color: '#FF6B00', fontFamily: 'monospace' }}>{r.registration_no}</Typography></TableCell>
+                    <TableCell sx={{ maxWidth: 140 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{r.vendor_name || '—'}</Typography>
                     </TableCell>
                     <TableCell><Typography variant="caption" sx={{ fontFamily: 'monospace' }}>{r.pan_number}</Typography></TableCell>
-                    <TableCell><Typography variant="caption" color="text.secondary">{r.email}</Typography></TableCell>
+                    <TableCell sx={{ maxWidth: 150 }}><Typography variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{r.email}</Typography></TableCell>
                     <TableCell><Typography variant="caption" color="text.secondary">{r.submitted_date || '—'}</Typography></TableCell>
                     <TableCell>
                       <Chip label={`${r.document_count}/5`} size="small"
@@ -1236,6 +1208,9 @@ function DashboardSection({ registrations, onNavigate }: {
               </TableBody>
             </Table>
           </TableContainer>
+          <TablePagination component="div" count={recent.length} page={dashPage}
+            onPageChange={(_, p) => setDashPage(p)} rowsPerPage={dashRpp} rowsPerPageOptions={[5]}
+            sx={{ borderTop: '1px solid #F3F4F6' }} />
         </Paper>
       )}
     </Stack>
@@ -1248,7 +1223,7 @@ function RegistrationsSection({ registrations, onRefresh }: { registrations: Api
   const [statusFilter, setStatus]   = useState<RegistrationStatus | 'All'>('All')
   const [page, setPage]             = useState(0)
   const [updatingId, setUpdatingId] = useState<number | null>(null)
-  const rpp = 8
+  const rpp = 10
 
   const handleStatusChange = async (registrationId: number, newStatus: string) => {
     setUpdatingId(registrationId)
@@ -1292,56 +1267,42 @@ function RegistrationsSection({ registrations, onRefresh }: { registrations: Api
               onChange={(e) => { setSearch(e.target.value); setPage(0) }}
               InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: '#9CA3AF', fontSize: 18 }} /></InputAdornment> }}
               sx={{ flex: 1, maxWidth: 360, '& .MuiOutlinedInput-root': { borderRadius: 2, '&.Mui-focused fieldset': { borderColor: '#FF6B00' } } }} />
-            <Stack direction="row" spacing={1} flexWrap="wrap">
-              {(['All', 'Draft', 'Submitted', 'Under Review', 'Approved', 'Rejected'] as const).map((s) => (
-                <Chip key={s} label={s} size="small" onClick={() => { setStatus(s); setPage(0) }}
-                  sx={{ cursor: 'pointer', fontWeight: 600, fontSize: 11, backgroundColor: statusFilter === s ? '#FF6B00' : '#F3F4F6', color: statusFilter === s ? '#fff' : '#6B7280', border: `1px solid ${statusFilter === s ? '#FF6B00' : '#E5E7EB'}`, '&:hover': { backgroundColor: statusFilter === s ? '#FF6B00' : '#FFF5EE' } }} />
+            <Stack direction="row" spacing={0.75} flexWrap="wrap">
+              {([['All', 'All'], ...Object.entries(STATUS_CFG).map(([k, v]) => [k, v.label])] as [string, string][]).map(([key, label]) => (
+                <Chip key={key} label={label} size="small" onClick={() => { setStatus(key as RegistrationStatus | 'All'); setPage(0) }}
+                  sx={{ cursor: 'pointer', fontWeight: 600, fontSize: 11, backgroundColor: statusFilter === key ? '#FF6B00' : '#F3F4F6', color: statusFilter === key ? '#fff' : '#6B7280', border: `1px solid ${statusFilter === key ? '#FF6B00' : '#E5E7EB'}`, '&:hover': { backgroundColor: statusFilter === key ? '#FF6B00' : '#FFF5EE' } }} />
               ))}
             </Stack>
           </Stack>
         </Box>
-        <TableContainer sx={{ overflowX: 'auto' }}>
-          <Table size="small" sx={{ minWidth: 860 }}>
+        <TableContainer>
+          <Table size="small">
             <TableHead>
-              <TableRow>{['Reg. No.', 'Vendor Name', 'PAN / GSTIN', 'Contact', 'Docs', 'Registered', 'Status'].map((h) => <TableCell key={h} sx={{ whiteSpace: 'nowrap' }}>{h}</TableCell>)}</TableRow>
+              <TableRow>{['Reg. No.', 'Vendor Name', 'PAN', 'Email', 'Docs', 'Date', 'Status'].map((h) => <TableCell key={h} sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{h}</TableCell>)}</TableRow>
             </TableHead>
             <TableBody>
               {filtered.slice(page * rpp, page * rpp + rpp).map((r) => (
                 <TableRow key={r.registration_id} hover sx={{ '&:hover': { backgroundColor: '#FFF8F3' } }}>
-                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                    <Typography variant="caption" fontWeight={700} color="#FF6B00" sx={{ fontFamily: 'monospace' }}>{r.registration_no}</Typography>
+                  <TableCell>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#FF6B00', fontFamily: 'monospace' }}>{r.registration_no}</Typography>
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 180 }}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Avatar sx={{ width: 24, height: 24, fontSize: 10, fontWeight: 700, background: 'linear-gradient(135deg,#FF6B00,#FF8C33)', flexShrink: 0 }}>{r.vendor_name?.charAt(0) || '?'}</Avatar>
-                      <Typography variant="caption" sx={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{r.vendor_name || '—'}</Typography>
-                    </Stack>
+                  <TableCell sx={{ maxWidth: 150 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{r.vendor_name || '—'}</Typography>
                   </TableCell>
-                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                    <Typography variant="caption" sx={{ fontFamily: 'monospace', fontWeight: 600, display: 'block' }}>{r.pan_number}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>{r.gstin || '—'}</Typography>
+                  <TableCell sx={{ maxWidth: 130 }}>
+                    <Typography variant="caption" sx={{ fontFamily: 'monospace', fontWeight: 600, display: 'block', fontSize: 10 }}>{r.pan_number}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: 10 }}>{r.gstin || '—'}</Typography>
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 160 }}>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <EmailOutlinedIcon sx={{ fontSize: 11, color: '#9CA3AF', flexShrink: 0 }} />
-                      <Typography variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.email}</Typography>
-                    </Stack>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <PhoneOutlinedIcon sx={{ fontSize: 11, color: '#9CA3AF', flexShrink: 0 }} />
-                      <Typography variant="caption" color="text.secondary">{r.mobile || '—'}</Typography>
-                    </Stack>
+                  <TableCell sx={{ maxWidth: 150 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{r.email}</Typography>
                   </TableCell>
-                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                      <LinearProgress variant="determinate" value={(r.document_count / 5) * 100}
-                        sx={{ width: 36, height: 4, borderRadius: 3, backgroundColor: '#F3F4F6', '& .MuiLinearProgress-bar': { backgroundColor: r.document_count === 5 ? '#059669' : '#FF6B00', borderRadius: 3 } }} />
-                      <Typography variant="caption" sx={{ fontWeight: 600, color: r.document_count === 5 ? '#059669' : '#FF6B00' }}>{r.document_count}/5</Typography>
-                    </Box>
+                  <TableCell>
+                    <Typography variant="caption" sx={{ fontWeight: 600, color: r.document_count === 5 ? '#059669' : '#FF6B00' }}>{r.document_count}/5</Typography>
                   </TableCell>
-                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                  <TableCell>
                     <Typography variant="caption" color="text.secondary">{r.submitted_date || r.created_date || '—'}</Typography>
                   </TableCell>
-                  <TableCell sx={{ minWidth: 160 }}>
+                  <TableCell>
                     <Select
                       value={r.registration_status}
                       size="small"
@@ -1353,7 +1314,7 @@ function RegistrationsSection({ registrations, onRefresh }: { registrations: Api
                           : <StatusChip status={val as string} />
                       )}
                       sx={{
-                        minWidth: 150,
+                        minWidth: 120,
                         '& .MuiOutlinedInput-notchedOutline': { border: '1px solid #E5E7EB', borderRadius: 2 },
                         '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#FF6B00' },
                         '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#FF6B00', borderWidth: 1 },
@@ -1382,7 +1343,7 @@ function RegistrationsSection({ registrations, onRefresh }: { registrations: Api
           </Table>
         </TableContainer>
         <TablePagination component="div" count={filtered.length} page={page}
-          onPageChange={(_, p) => setPage(p)} rowsPerPage={rpp} rowsPerPageOptions={[8]}
+          onPageChange={(_, p) => setPage(p)} rowsPerPage={rpp} rowsPerPageOptions={[10]}
           sx={{ borderTop: '1px solid #F3F4F6' }} />
       </Paper>
     </Stack>
@@ -1405,7 +1366,7 @@ function ApprovalsSection({ registrations, onRefresh }: {
 
   const pending = registrations.filter((r) => PENDING_REVIEW_STATUSES.includes(r.registration_status))
 
-  const handleReview = async (registrationId: number, action: 'Approved' | 'Rejected') => {
+  const handleReview = async (registrationId: number, action: 'APPROVED' | 'REJECTED') => {
     setReviewLoading((p) => ({ ...p, [registrationId]: true }))
     try {
       const res = await fetch(`/api/finance/registrations/${registrationId}/review/`, {
@@ -1419,6 +1380,38 @@ function ApprovalsSection({ registrations, onRefresh }: {
       }
     } finally {
       setReviewLoading((p) => ({ ...p, [registrationId]: false }))
+    }
+  }
+
+  // Reject dialog state
+  const [rejectId, setRejectId]           = useState<number | null>(null)
+  const [rejectReason, setRejectReason]   = useState('')
+  const [rejectLoading, setRejectLoading] = useState(false)
+  const [rejectError, setRejectError]     = useState('')
+
+  const openReject = (registrationId: number) => {
+    setRejectId(registrationId)
+    setRejectReason('')
+    setRejectError('')
+  }
+
+  const confirmReject = async () => {
+    if (!rejectReason.trim()) { setRejectError('Please enter a reason for rejection.'); return }
+    if (!rejectId) return
+    setRejectLoading(true)
+    try {
+      const res = await fetch(`/api/finance/registrations/${rejectId}/review/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'REJECTED', remarks: rejectReason.trim() }),
+      })
+      if (res.ok) {
+        setReviewDone((p) => ({ ...p, [rejectId]: 'REJECTED' }))
+        setRejectId(null)
+        onRefresh()
+      }
+    } finally {
+      setRejectLoading(false)
     }
   }
 
@@ -1436,10 +1429,10 @@ function ApprovalsSection({ registrations, onRefresh }: {
       const res = await fetch(`/api/finance/registrations/${sendBackId}/review/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'Sent Back', remarks: sendBackReason.trim() }),
+        body: JSON.stringify({ action: 'SEND_BACK', remarks: sendBackReason.trim() }),
       })
       if (res.ok) {
-        setReviewDone((p) => ({ ...p, [sendBackId]: 'Sent Back' }))
+        setReviewDone((p) => ({ ...p, [sendBackId]: 'SEND_BACK' }))
         setSendBackId(null)
         onRefresh()
       }
@@ -1449,16 +1442,16 @@ function ApprovalsSection({ registrations, onRefresh }: {
   }
 
   const cardColors = (action: string) => {
-    if (action === 'Approved')  return { border: '#BBF7D0', bg: '#F0FFF4', divider: '#D1FAE5' }
-    if (action === 'Rejected')  return { border: '#FCA5A5', bg: '#FFF5F5', divider: '#FCA5A5' }
-    if (action === 'Sent Back') return { border: '#FDE68A', bg: '#FFFBEB', divider: '#FDE68A' }
+    if (action === 'APPROVED')  return { border: '#BBF7D0', bg: '#F0FFF4', divider: '#D1FAE5' }
+    if (action === 'REJECTED')  return { border: '#FCA5A5', bg: '#FFF5F5', divider: '#FCA5A5' }
+    if (action === 'SEND_BACK') return { border: '#FDE68A', bg: '#FFFBEB', divider: '#FDE68A' }
     return { border: '#F3F4F6', bg: '#fff', divider: '#F3F4F6' }
   }
 
   const doneChipProps = (action: string) => {
-    if (action === 'Approved')  return { label: '✓ Approved',  sx: { backgroundColor: '#D1FAE5', color: '#059669' } }
-    if (action === 'Rejected')  return { label: '✗ Rejected',  sx: { backgroundColor: '#FEE2E2', color: '#DC2626' } }
-    if (action === 'Sent Back') return { label: '↩ Sent Back', sx: { backgroundColor: '#FEF9C3', color: '#92400E' } }
+    if (action === 'APPROVED')  return { label: '✓ Approved',  sx: { backgroundColor: '#D1FAE5', color: '#059669' } }
+    if (action === 'REJECTED')  return { label: '✗ Rejected',  sx: { backgroundColor: '#FEE2E2', color: '#DC2626' } }
+    if (action === 'SEND_BACK') return { label: '↩ Sent Back', sx: { backgroundColor: '#FEF9C3', color: '#92400E' } }
     return { label: action, sx: {} }
   }
 
@@ -1521,7 +1514,7 @@ function ApprovalsSection({ registrations, onRefresh }: {
                     ) : (
                       <>
                         <Button size="small" variant="outlined" disabled={isLoading}
-                          onClick={() => handleReview(r.registration_id, 'Rejected')}
+                          onClick={() => openReject(r.registration_id)}
                           sx={{ fontSize: 11, borderColor: '#FCA5A5', color: '#DC2626', '&:hover': { backgroundColor: '#FFF5F5', borderColor: '#DC2626' } }}>
                           {isLoading ? <CircularProgress size={14} /> : 'Reject'}
                         </Button>
@@ -1532,7 +1525,7 @@ function ApprovalsSection({ registrations, onRefresh }: {
                           Send Back
                         </Button>
                         <Button size="small" variant="contained" disabled={isLoading}
-                          onClick={() => handleReview(r.registration_id, 'Approved')}
+                          onClick={() => handleReview(r.registration_id, 'APPROVED')}
                           sx={{ fontSize: 11, background: 'linear-gradient(135deg,#059669,#10B981)', boxShadow: '0 3px 10px rgba(5,150,105,0.25)', '&:hover': { background: 'linear-gradient(135deg,#047857,#059669)' } }}>
                           {isLoading ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : 'Approve'}
                         </Button>
@@ -1550,9 +1543,9 @@ function ApprovalsSection({ registrations, onRefresh }: {
                     { label: 'Mobile',  value: r.mobile || '—' },
                   ].map(({ label, value }) => (
                     <Box key={label} sx={{ minWidth: 130 }}>
-                      <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>{label}</Typography>
                       <Typography variant="caption" fontWeight={600} color="text.primary"
-                        sx={{ fontFamily: label === 'GSTIN' ? 'monospace' : 'inherit' }}>
+                        sx={{ display: 'block', fontFamily: label === 'GSTIN' ? 'monospace' : 'inherit' }}>
                         {value}
                       </Typography>
                     </Box>
@@ -1611,6 +1604,51 @@ function ApprovalsSection({ registrations, onRefresh }: {
             startIcon={sendBackLoading ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : <ReplyOutlinedIcon sx={{ fontSize: 16 }} />}
             sx={{ background: 'linear-gradient(135deg,#D97706,#F59E0B)', boxShadow: '0 4px 14px rgba(217,119,6,0.3)', '&:hover': { background: 'linear-gradient(135deg,#B45309,#D97706)' } }}>
             {sendBackLoading ? 'Sending…' : 'Send Back to Vendor'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Reject dialog ── */}
+      <Dialog open={rejectId !== null} onClose={() => !rejectLoading && setRejectId(null)}
+        maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
+        <DialogTitle sx={{ borderBottom: '1px solid #F3F4F6', pb: 1.5 }}>
+          <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1.5}>
+            <Box sx={{ width: 36, height: 36, borderRadius: 2, backgroundColor: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <CancelOutlinedIcon sx={{ color: '#DC2626', fontSize: 20 }} />
+            </Box>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#1A1A2E' }}>Reject Application</Typography>
+              <Typography variant="caption" color="text.secondary">The vendor will be notified with the rejection reason.</Typography>
+            </Box>
+          </Stack>
+        </DialogTitle>
+
+        <DialogContent sx={{ pt: 2.5 }}>
+          <DialogContentText sx={{ fontSize: 13.5, color: '#374151', mb: 2 }}>
+            Please provide a clear reason for rejection. This will be shown to the vendor on their dashboard.
+          </DialogContentText>
+          <TextField
+            label="Reason for Rejection *"
+            placeholder="e.g. Documents provided are incomplete or invalid. GSTIN does not match the PAN details."
+            multiline rows={4} fullWidth autoFocus
+            value={rejectReason}
+            onChange={(e) => { setRejectReason(e.target.value); if (rejectError) setRejectError('') }}
+            error={!!rejectError}
+            helperText={rejectError || `${rejectReason.length}/1000`}
+            slotProps={{ htmlInput: { maxLength: 1000 } }}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, '&.Mui-focused fieldset': { borderColor: '#DC2626' } }, '& label.Mui-focused': { color: '#DC2626' } }}
+          />
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3, pb: 2.5, pt: 1, gap: 1 }}>
+          <Button variant="outlined" disabled={rejectLoading} onClick={() => setRejectId(null)} fullWidth
+            sx={{ borderColor: '#E5E7EB', color: '#374151', '&:hover': { borderColor: '#9CA3AF' } }}>
+            Cancel
+          </Button>
+          <Button variant="contained" disabled={rejectLoading} onClick={confirmReject} fullWidth
+            startIcon={rejectLoading ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : <CancelOutlinedIcon sx={{ fontSize: 16 }} />}
+            sx={{ background: 'linear-gradient(135deg,#DC2626,#EF4444)', boxShadow: '0 4px 14px rgba(220,38,38,0.3)', '&:hover': { background: 'linear-gradient(135deg,#B91C1C,#DC2626)' } }}>
+            {rejectLoading ? 'Rejecting…' : 'Confirm Rejection'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1782,7 +1820,6 @@ const TITLES: Record<SectionId, { title: string; sub: string }> = {
   registrations: { title: 'All Registrations',   sub: 'Browse and filter all vendor registration records' },
   approvals:     { title: 'Pending Approvals',   sub: 'Review registration form data and documents, then approve or reject' },
   documents:     { title: 'Document Review',     sub: 'Verify KYC documents submitted by vendors' },
-  reports:       { title: 'Reports & Analytics', sub: 'Finance reports and insights' },
 }
 
 export default function FinanceHome() {
@@ -1838,7 +1875,6 @@ export default function FinanceHome() {
       case 'registrations': return <RegistrationsSection registrations={registrations} onRefresh={() => fetchRegistrations(true)} />
       case 'approvals':     return <ApprovalsSection registrations={registrations} onRefresh={() => fetchRegistrations(true)} />
       case 'documents':     return <DocumentsSection registrations={registrations} />
-      case 'reports':       return <ReportsSection />
     }
   }
 
