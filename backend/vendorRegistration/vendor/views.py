@@ -493,10 +493,16 @@ _ORD_WORDS: dict[str, str] = {
     'seventh':'7','eighth':'8','ninth':'9','tenth':'10','eleventh':'11',
     'twelfth':'12','thirteenth':'13','fourteenth':'14','fifteenth':'15',
     'sixteenth':'16','seventeenth':'17','eighteenth':'18','nineteenth':'19',
-    'twentieth':'20','twenty-first':'21','twenty-second':'22','twenty-third':'23',
+    'twentieth':'20',
+    # hyphenated forms (e.g. "twenty-fourth")
+    'twenty-first':'21','twenty-second':'22','twenty-third':'23',
     'twenty-fourth':'24','twenty-fifth':'25','twenty-sixth':'26',
     'twenty-seventh':'27','twenty-eighth':'28','twenty-ninth':'29',
-    'thirtieth':'30','thirty-first':'31',
+    # unhyphenated forms as OCR often outputs (e.g. "TWENTYFOURTH")
+    'twentyfirst':'21','twentysecond':'22','twentythird':'23',
+    'twentyfourth':'24','twentyfifth':'25','twentysixth':'26',
+    'twentyseventh':'27','twentyeighth':'28','twentyninth':'29',
+    'thirtieth':'30','thirty-first':'31','thirtyfirst':'31',
 }
 
 _UNIT_NUMS: dict[str, int] = {
