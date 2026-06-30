@@ -176,8 +176,8 @@ def send_vendor_status_email(
 
       <!-- Header -->
       <div style="background:{cfg['header_bg']};padding:32px 28px;text-align:center;">
-        <div style="width:52px;height:52px;border-radius:50%;background:{cfg['icon_bg']};display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
-          <span style="font-size:24px;color:{cfg['icon_color']};font-weight:700;">{cfg['icon']}</span>
+        <div style="width:52px;height:52px;border-radius:50%;background:{cfg['icon_bg']};display:inline-block;line-height:52px;text-align:center;margin-bottom:12px;">
+          <span style="font-size:24px;color:{cfg['icon_color']};font-weight:700;line-height:52px;vertical-align:middle;">{cfg['icon']}</span>
         </div>
         <h2 style="color:#fff;margin:0;font-size:20px;font-weight:700;">{cfg['header_title']}</h2>
         <p style="color:rgba(255,255,255,0.85);margin:6px 0 0;font-size:13px;">{cfg['header_sub']}</p>

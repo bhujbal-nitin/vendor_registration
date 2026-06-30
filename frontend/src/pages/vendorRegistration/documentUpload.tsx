@@ -736,9 +736,83 @@ export default function DocumentUpload() {
       {/* Awaiting analysis dialog — shown when docs are still being analysed */}
       <Dialog open={awaitingAnalysis} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
         <DialogContent sx={{ textAlign: 'center', py: 4, px: 4 }}>
-          <CircularProgress size={44} sx={{ color: '#FF6B00', mb: 2 }} />
+
+          {/* Animated document processing icon */}
+          <Box sx={{ position: 'relative', width: 88, height: 88, mx: 'auto', mb: 2.5 }}>
+            {/* Outer pulsing ring */}
+            <Box sx={{
+              position: 'absolute', inset: 0, borderRadius: '50%',
+              border: '2px solid #FF6B00',
+              animation: 'outerPulse 2s ease-in-out infinite',
+              '@keyframes outerPulse': {
+                '0%, 100%': { transform: 'scale(1)', opacity: 0.4 },
+                '50%': { transform: 'scale(1.18)', opacity: 0.1 },
+              },
+            }} />
+            {/* Inner background circle */}
+            <Box sx={{
+              position: 'absolute', inset: 8, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #FFF5EE, #FFE8D5)',
+              animation: 'innerPulse 2s ease-in-out infinite',
+              '@keyframes innerPulse': {
+                '0%, 100%': { transform: 'scale(1)' },
+                '50%': { transform: 'scale(1.06)' },
+              },
+            }} />
+            {/* Document icon */}
+            <Box sx={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <InsertDriveFileOutlinedIcon sx={{ fontSize: 38, color: '#FF6B00' }} />
+            </Box>
+            {/* Scanning line over icon */}
+            <Box sx={{
+              position: 'absolute', left: 12, right: 12, height: 2,
+              borderRadius: 1,
+              background: 'linear-gradient(90deg, transparent, #FF6B00, transparent)',
+              animation: 'scanLine 1.8s ease-in-out infinite',
+              '@keyframes scanLine': {
+                '0%':   { top: '20%', opacity: 0 },
+                '20%':  { opacity: 1 },
+                '80%':  { opacity: 1 },
+                '100%': { top: '78%', opacity: 0 },
+              },
+            }} />
+            {/* Floating dot — top right */}
+            <Box sx={{
+              position: 'absolute', top: 6, right: 8,
+              width: 7, height: 7, borderRadius: '50%', backgroundColor: '#FF6B00',
+              animation: 'dot1 2.2s ease-in-out infinite',
+              '@keyframes dot1': {
+                '0%, 100%': { transform: 'translate(0,0)', opacity: 1 },
+                '50%':      { transform: 'translate(5px,-7px)', opacity: 0.5 },
+              },
+            }} />
+            {/* Floating dot — top left */}
+            <Box sx={{
+              position: 'absolute', top: 12, left: 6,
+              width: 5, height: 5, borderRadius: '50%', backgroundColor: '#FFB87A',
+              animation: 'dot2 2.6s ease-in-out infinite',
+              '@keyframes dot2': {
+                '0%, 100%': { transform: 'translate(0,0)', opacity: 0.8 },
+                '50%':      { transform: 'translate(-5px,-6px)', opacity: 0.3 },
+              },
+            }} />
+            {/* Floating dot — bottom right */}
+            <Box sx={{
+              position: 'absolute', bottom: 10, right: 6,
+              width: 6, height: 6, borderRadius: '50%', backgroundColor: '#FF8C33',
+              animation: 'dot3 1.9s ease-in-out infinite',
+              '@keyframes dot3': {
+                '0%, 100%': { transform: 'translate(0,0)', opacity: 0.9 },
+                '50%':      { transform: 'translate(6px,5px)', opacity: 0.4 },
+              },
+            }} />
+          </Box>
+
           <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#1A1A2E', mb: 0.75 }}>
-            Analysing your documents
+            Document Processing
           </Typography>
           <Typography sx={{ fontSize: 13, color: '#6B7280', lineHeight: 1.7, mb: 1.5 }}>
             Waiting for OCR analysis to complete.<br />

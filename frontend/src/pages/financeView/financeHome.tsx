@@ -7,7 +7,7 @@ import {
   TableCell, TableContainer, TableHead, TableRow, TablePagination,
   TextField, InputAdornment, LinearProgress, Badge,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-  CircularProgress, Alert, Select,
+  CircularProgress, Alert, Select, Snackbar,
 } from '@mui/material'
 import type { SvgIconProps } from '@mui/material'
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
@@ -1223,19 +1223,66 @@ function RegistrationsSection({ registrations, onRefresh }: { registrations: Api
   const [statusFilter, setStatus]   = useState<RegistrationStatus | 'All'>('All')
   const [page, setPage]             = useState(0)
   const [updatingId, setUpdatingId] = useState<number | null>(null)
+  const [actionError, setActionError] = useState('')
+  const [actionInfo, setActionInfo] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
   const rpp = 10
 
+  // Dialog state for status changes that require a reason
+  const [remarkDialog, setRemarkDialog] = useState<{ registrationId: number; action: string } | null>(null)
+  const [remarkText, setRemarkText]     = useState('')
+  const [remarkError, setRemarkError]   = useState('')
+  const [remarkLoading, setRemarkLoading] = useState(false)
+
+  const REQUIRES_REMARK = new Set(['REJECTED', 'SEND_BACK'])
+
   const handleStatusChange = async (registrationId: number, newStatus: string) => {
+    // For Reject / Send Back — open dialog to collect reason first
+    if (REQUIRES_REMARK.has(newStatus)) {
+      setRemarkDialog({ registrationId, action: newStatus })
+      setRemarkText('')
+      setRemarkError('')
+      return
+    }
+    // All other statuses — submit directly
+    await submitStatusChange(registrationId, newStatus, '')
+  }
+
+  const submitStatusChange = async (registrationId: number, newStatus: string, remarks: string) => {
     setUpdatingId(registrationId)
+    if (newStatus === 'APPROVED') setActionInfo('Creating vendor ledger in Tally… please wait.')
     try {
       const res = await fetch(`/api/finance/registrations/${registrationId}/review/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: newStatus }),
+        body: JSON.stringify({ action: newStatus, remarks }),
       })
-      if (res.ok) onRefresh()
+      if (res.ok) {
+        setActionSuccess(
+          newStatus === 'APPROVED'
+            ? 'Vendor approved — ledger created successfully in Tally.'
+            : 'Status updated successfully.'
+        )
+        onRefresh()
+      } else {
+        const errBody = await res.json().catch(() => ({}))
+        setActionError(errBody.detail || 'Status change failed. Please try again.')
+      }
     } finally {
       setUpdatingId(null)
+      setActionInfo('')
+    }
+  }
+
+  const confirmRemark = async () => {
+    if (!remarkText.trim()) { setRemarkError('Please enter a reason.'); return }
+    if (!remarkDialog) return
+    setRemarkLoading(true)
+    try {
+      await submitStatusChange(remarkDialog.registrationId, remarkDialog.action, remarkText.trim())
+      setRemarkDialog(null)
+    } finally {
+      setRemarkLoading(false)
     }
   }
 
@@ -1254,10 +1301,6 @@ function RegistrationsSection({ registrations, onRefresh }: { registrations: Api
           <Typography variant="h5" color="text.primary">All Registrations</Typography>
           <Typography variant="caption" color="text.secondary">{filtered.length} vendor registration{filtered.length !== 1 ? 's' : ''} found</Typography>
         </Box>
-        <Button variant="outlined" startIcon={<FileDownloadOutlinedIcon />} size="small"
-          sx={{ borderColor: '#E5E7EB', color: '#6B7280', '&:hover': { borderColor: '#FF6B00', color: '#FF6B00', backgroundColor: '#FFF5EE' } }}>
-          Export
-        </Button>
       </Stack>
 
       <Paper elevation={0} sx={{ border: '1px solid #F3F4F6' }}>
@@ -1346,6 +1389,116 @@ function RegistrationsSection({ registrations, onRefresh }: { registrations: Api
           onPageChange={(_, p) => setPage(p)} rowsPerPage={rpp} rowsPerPageOptions={[10]}
           sx={{ borderTop: '1px solid #F3F4F6' }} />
       </Paper>
+
+      {/* ── Reason dialog for Reject / Send Back from All Registrations ── */}
+      <Dialog open={remarkDialog !== null} onClose={() => !remarkLoading && setRemarkDialog(null)}
+        maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
+        <DialogTitle sx={{ borderBottom: '1px solid #F3F4F6', pb: 1.5 }}>
+          <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1.5}>
+            <Box sx={{
+              width: 36, height: 36, borderRadius: 2, flexShrink: 0,
+              backgroundColor: remarkDialog?.action === 'REJECTED' ? '#FEE2E2' : '#FEF9C3',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {remarkDialog?.action === 'REJECTED'
+                ? <CancelOutlinedIcon sx={{ color: '#DC2626', fontSize: 20 }} />
+                : <ReplyOutlinedIcon  sx={{ color: '#D97706', fontSize: 20 }} />}
+            </Box>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#1A1A2E' }}>
+                {remarkDialog?.action === 'REJECTED' ? 'Reject Application' : 'Send Application Back to Vendor'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {remarkDialog?.action === 'REJECTED'
+                  ? 'The vendor will be notified with the rejection reason.'
+                  : 'The vendor will be able to edit their form and re-upload documents.'}
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogTitle>
+
+        <DialogContent sx={{ pt: 2.5 }}>
+          <DialogContentText sx={{ fontSize: 13.5, color: '#374151', mb: 2 }}>
+            {remarkDialog?.action === 'REJECTED'
+              ? 'Please provide a clear reason for rejection. This will be shown to the vendor on their dashboard.'
+              : 'Please describe what needs to be corrected. The vendor will see this reason on their dashboard.'}
+          </DialogContentText>
+          <TextField
+            label={remarkDialog?.action === 'REJECTED' ? 'Reason for Rejection *' : 'Reason / Instructions for vendor *'}
+            multiline rows={4} fullWidth autoFocus
+            value={remarkText}
+            onChange={(e) => { setRemarkText(e.target.value); if (remarkError) setRemarkError('') }}
+            error={!!remarkError}
+            helperText={remarkError || `${remarkText.length}/1000`}
+            slotProps={{ htmlInput: { maxLength: 1000 } }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 2,
+                '&.Mui-focused fieldset': {
+                  borderColor: remarkDialog?.action === 'REJECTED' ? '#DC2626' : '#D97706',
+                },
+              },
+              '& label.Mui-focused': {
+                color: remarkDialog?.action === 'REJECTED' ? '#DC2626' : '#D97706',
+              },
+            }}
+          />
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3, pb: 2.5, pt: 1, gap: 1 }}>
+          <Button variant="outlined" disabled={remarkLoading} onClick={() => setRemarkDialog(null)} fullWidth
+            sx={{ borderColor: '#E5E7EB', color: '#374151', '&:hover': { borderColor: '#9CA3AF' } }}>
+            Cancel
+          </Button>
+          <Button variant="contained" disabled={remarkLoading} onClick={confirmRemark} fullWidth
+            startIcon={remarkLoading
+              ? <CircularProgress size={14} sx={{ color: '#fff' }} />
+              : remarkDialog?.action === 'REJECTED'
+                ? <CancelOutlinedIcon sx={{ fontSize: 16 }} />
+                : <ReplyOutlinedIcon  sx={{ fontSize: 16 }} />}
+            sx={{
+              background: remarkDialog?.action === 'REJECTED'
+                ? 'linear-gradient(135deg,#DC2626,#EF4444)'
+                : 'linear-gradient(135deg,#D97706,#F59E0B)',
+              boxShadow: remarkDialog?.action === 'REJECTED'
+                ? '0 4px 14px rgba(220,38,38,0.3)'
+                : '0 4px 14px rgba(217,119,6,0.3)',
+              '&:hover': {
+                background: remarkDialog?.action === 'REJECTED'
+                  ? 'linear-gradient(135deg,#B91C1C,#DC2626)'
+                  : 'linear-gradient(135deg,#B45309,#D97706)',
+              },
+            }}>
+            {remarkLoading
+              ? 'Submitting…'
+              : remarkDialog?.action === 'REJECTED' ? 'Confirm Rejection' : 'Send Back to Vendor'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* In-progress: e.g. "Creating vendor ledger in Tally…" — stays open until the action finishes */}
+      <Snackbar open={!!actionInfo} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="info" icon={<CircularProgress size={16} sx={{ color: '#1D4ED8' }} />}
+          sx={{ width: '100%', maxWidth: 480, borderRadius: 2 }}>
+          {actionInfo}
+        </Alert>
+      </Snackbar>
+
+      {/* Success confirmation */}
+      <Snackbar open={!!actionSuccess} autoHideDuration={6000} onClose={() => setActionSuccess('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="success" onClose={() => setActionSuccess('')} sx={{ width: '100%', maxWidth: 480, borderRadius: 2 }}>
+          {actionSuccess}
+        </Alert>
+      </Snackbar>
+
+      {/* Status change / Tally action errors */}
+      <Snackbar open={!!actionError} autoHideDuration={8000} onClose={() => setActionError('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="error" onClose={() => setActionError('')} sx={{ width: '100%', maxWidth: 480, borderRadius: 2 }}>
+          {actionError}
+        </Alert>
+      </Snackbar>
     </Stack>
   )
 }
@@ -1357,6 +1510,9 @@ function ApprovalsSection({ registrations, onRefresh }: {
   const [reviewLoading, setReviewLoading] = useState<Record<number, boolean>>({})
   const [reviewDone, setReviewDone]       = useState<Record<number, string>>({})
   const [detailId, setDetailId]           = useState<number | null>(null)
+  const [actionError, setActionError]     = useState('')
+  const [actionInfo, setActionInfo]       = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
 
   // Send-back dialog state
   const [sendBackId, setSendBackId]           = useState<number | null>(null)
@@ -1368,6 +1524,7 @@ function ApprovalsSection({ registrations, onRefresh }: {
 
   const handleReview = async (registrationId: number, action: 'APPROVED' | 'REJECTED') => {
     setReviewLoading((p) => ({ ...p, [registrationId]: true }))
+    if (action === 'APPROVED') setActionInfo('Creating vendor ledger in Tally… please wait.')
     try {
       const res = await fetch(`/api/finance/registrations/${registrationId}/review/`, {
         method: 'POST',
@@ -1376,10 +1533,19 @@ function ApprovalsSection({ registrations, onRefresh }: {
       })
       if (res.ok) {
         setReviewDone((p) => ({ ...p, [registrationId]: action }))
+        setActionSuccess(
+          action === 'APPROVED'
+            ? 'Vendor approved — ledger created successfully in Tally.'
+            : 'Registration rejected successfully.'
+        )
         onRefresh()
+      } else {
+        const errBody = await res.json().catch(() => ({}))
+        setActionError(errBody.detail || 'Action failed. Please try again.')
       }
     } finally {
       setReviewLoading((p) => ({ ...p, [registrationId]: false }))
+      setActionInfo('')
     }
   }
 
@@ -1407,8 +1573,12 @@ function ApprovalsSection({ registrations, onRefresh }: {
       })
       if (res.ok) {
         setReviewDone((p) => ({ ...p, [rejectId]: 'REJECTED' }))
+        setActionSuccess('Registration rejected successfully.')
         setRejectId(null)
         onRefresh()
+      } else {
+        const errBody = await res.json().catch(() => ({}))
+        setActionError(errBody.detail || 'Rejection failed. Please try again.')
       }
     } finally {
       setRejectLoading(false)
@@ -1433,8 +1603,12 @@ function ApprovalsSection({ registrations, onRefresh }: {
       })
       if (res.ok) {
         setReviewDone((p) => ({ ...p, [sendBackId]: 'SEND_BACK' }))
+        setActionSuccess('Registration sent back to vendor successfully.')
         setSendBackId(null)
         onRefresh()
+      } else {
+        const errBody = await res.json().catch(() => ({}))
+        setActionError(errBody.detail || 'Send back failed. Please try again.')
       }
     } finally {
       setSendBackLoading(false)
@@ -1516,7 +1690,7 @@ function ApprovalsSection({ registrations, onRefresh }: {
                         <Button size="small" variant="outlined" disabled={isLoading}
                           onClick={() => openReject(r.registration_id)}
                           sx={{ fontSize: 11, borderColor: '#FCA5A5', color: '#DC2626', '&:hover': { backgroundColor: '#FFF5F5', borderColor: '#DC2626' } }}>
-                          {isLoading ? <CircularProgress size={14} /> : 'Reject'}
+                          Reject
                         </Button>
                         <Button size="small" variant="outlined" disabled={isLoading}
                           startIcon={<ReplyOutlinedIcon sx={{ fontSize: 14 }} />}
@@ -1654,6 +1828,30 @@ function ApprovalsSection({ registrations, onRefresh }: {
       </Dialog>
 
       <VendorDetailDialog registrationId={detailId} open={detailId !== null} onClose={() => setDetailId(null)} />
+
+      {/* In-progress: e.g. "Creating vendor ledger in Tally…" — stays open until the action finishes */}
+      <Snackbar open={!!actionInfo} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="info" icon={<CircularProgress size={16} sx={{ color: '#1D4ED8' }} />}
+          sx={{ width: '100%', maxWidth: 480, borderRadius: 2 }}>
+          {actionInfo}
+        </Alert>
+      </Snackbar>
+
+      {/* Success confirmation */}
+      <Snackbar open={!!actionSuccess} autoHideDuration={6000} onClose={() => setActionSuccess('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="success" onClose={() => setActionSuccess('')} sx={{ width: '100%', maxWidth: 480, borderRadius: 2 }}>
+          {actionSuccess}
+        </Alert>
+      </Snackbar>
+
+      {/* Approval/Tally action errors */}
+      <Snackbar open={!!actionError} autoHideDuration={8000} onClose={() => setActionError('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="error" onClose={() => setActionError('')} sx={{ width: '100%', maxWidth: 480, borderRadius: 2 }}>
+          {actionError}
+        </Alert>
+      </Snackbar>
     </Stack>
   )
 }

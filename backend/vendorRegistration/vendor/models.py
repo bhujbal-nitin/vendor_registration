@@ -250,3 +250,27 @@ class VendorFieldChangeLog(models.Model):
 
     def __str__(self):
         return f"Reg {self.registration_id} — {self.field_name} changed by {self.changed_by}"
+
+
+class TallySyncLog(models.Model):
+    """
+    One row per Tally vendor-ledger sync attempt (insert-only, no upsert).
+    Records the full request/response for audit and troubleshooting.
+    """
+    sync_id          = models.BigAutoField(primary_key=True)
+    registration      = models.ForeignKey(
+        VendorRegistration,
+        on_delete=models.CASCADE,
+        db_column="registration_id",
+        related_name="tally_sync_logs",
+    )
+    request_payload  = models.TextField(null=True, blank=True)
+    response_payload = models.TextField(null=True, blank=True)
+    sync_status       = models.CharField(max_length=20, null=True, blank=True)
+    sync_date         = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tb_tally_sync_log"
+
+    def __str__(self):
+        return f"Reg {self.registration_id} — {self.sync_status} @ {self.sync_date}"

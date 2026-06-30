@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import VendorRegistration, VendorUser, VendorDocument, VendorProfile, VendorGST, VendorBankDetails, VendorDocumentExtraction, VendorFieldChangeLog, VendorComparisonResult, VendorApprovalHistory, VendorNotification
+from .models import VendorRegistration, VendorUser, VendorDocument, VendorProfile, VendorGST, VendorBankDetails, VendorDocumentExtraction, VendorFieldChangeLog, VendorComparisonResult, VendorApprovalHistory, VendorNotification, TallySyncLog
 from .serializers import (
     RegisterRequestSerializer, LoginRequestSerializer, DocumentSerializer,
     RegistrationFormSerializer, VendorProfileSerializer, VendorGSTSerializer,
@@ -21,6 +21,7 @@ from .serializers import (
 )
 from .utils.password import generate_password, hash_password, verify_password
 from .ae_service import get_ae_token, execute_document_workflow, DOCUMENT_WORKFLOW_MAP, get_workflow_status
+from . import tally_service
 
 import logging
 logger = logging.getLogger(__name__)
@@ -455,6 +456,45 @@ class VendorReviewView(APIView):
                 {'detail': f"action must be one of: {', '.join(valid_actions)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Approval must succeed in Tally before the status is allowed to change.
+        # If the Tally sync fails, the registration stays in its current status
+        # and the error is returned to the finance admin to act on.
+        if action == 'APPROVED':
+            profile = reg.profiles.first()
+            gst     = reg.gst_details.first()
+            bank    = reg.bank_details.first()
+            address = (profile.address if profile else "") or ""
+            pincode = _parse_address(address).get("pincode", "")
+
+            vendor_payload = {
+                "name":                (profile.vendor_name if profile else "") or "",
+                "pan":                 (reg.user.pan_number if reg.user_id else "") or "",
+                "address":             address,
+                "state":               (gst.state_name if gst else "") or "",
+                "pincode":             pincode,
+                "gstin":               (gst.gstin if gst else "") or "",
+                "bank_name":           (bank.bank_name if bank else "") or "",
+                "ifsc_code":           (bank.ifsc_code if bank else "") or "",
+                "account_number":      (bank.account_number if bank else "") or "",
+                "account_holder_name": (bank.account_holder_name if bank else "") or "",
+            }
+
+            result = tally_service.create_vendor_ledger(vendor_payload)
+
+            TallySyncLog.objects.create(
+                registration      = reg,
+                request_payload   = result["request_payload"],
+                response_payload  = result["response_payload"],
+                sync_status        = "Synced" if result["success"] else "Failed",
+            )
+
+            if not result["success"]:
+                logger.error("Tally sync failed for reg %s: %s", reg.registration_id, result["message"])
+                return Response(
+                    {"detail": f"Approval blocked — could not create vendor in Tally: {result['message']}"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
 
         reg.registration_status = action
         reg.current_stage       = _ACTION_STAGE_MAP.get(action, reg.current_stage)
@@ -1133,6 +1173,9 @@ class RegistrationFormView(APIView):
             "name_as_per_bank":  d.get("name_as_per_bank", "") or "",
             "contact_person_ae": d.get("contact_person_ae", "") or "",
         }
+        # Fetch profile once — used for changed_by and action_by below
+        _vendor_profile = vendor_reg.profiles.first()
+
         extracted = _build_extracted_fields(vendor_reg.registration_id)
         change_logs = []
         for form_key, display_name in _LOG_FIELDS.items():
@@ -1155,7 +1198,7 @@ class RegistrationFormView(APIView):
                     field_name     = display_name,
                     original_value = original or None,
                     modified_value = sub_val,
-                    changed_by     = vendor_reg.user.email if vendor_reg.user_id else "",
+                    changed_by     = str(_vendor_profile.profile_id) if _vendor_profile else "",
                 ))
         if change_logs:
             VendorFieldChangeLog.objects.bulk_create(change_logs)
@@ -1167,12 +1210,11 @@ class RegistrationFormView(APIView):
             logger.error("Comparison result save failed for reg %s: %s", vendor_reg.registration_id, exc)
 
         # 9. Record vendor action in approval history
-        vendor_email = vendor_reg.user.email if vendor_reg.user_id else "Vendor"
         VendorApprovalHistory.objects.create(
             registration = vendor_reg,
             action       = vendor_reg.registration_status,
             comments     = None,
-            action_by    = vendor_email,
+            action_by    = str(_vendor_profile.profile_id) if _vendor_profile else "",
         )
 
         return Response(
