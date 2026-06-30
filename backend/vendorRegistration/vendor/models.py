@@ -274,3 +274,31 @@ class TallySyncLog(models.Model):
 
     def __str__(self):
         return f"Reg {self.registration_id} — {self.sync_status} @ {self.sync_date}"
+
+
+class VendorMaster(models.Model):
+    """
+    One row per registration. Populated only after the vendor's ledger has
+    been successfully created in Tally (see VendorReviewView APPROVED flow).
+    """
+    vendor_id         = models.BigAutoField(primary_key=True)
+    registration      = models.OneToOneField(
+        VendorRegistration,
+        on_delete=models.CASCADE,
+        db_column="registration_id",
+        related_name="vendor_master",
+    )
+    vendor_code       = models.CharField(max_length=50, unique=True)
+    vendor_name       = models.CharField(max_length=255, null=True, blank=True)
+    pan_number        = models.CharField(max_length=10, null=True, blank=True)
+    gstin             = models.CharField(max_length=15, null=True, blank=True)
+    address           = models.CharField(max_length=1000, null=True, blank=True)
+    status            = models.CharField(max_length=20, default="Active")
+    tally_ledger_code = models.CharField(max_length=100, null=True, blank=True)
+    created_date      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tb_vendor_master"
+
+    def __str__(self):
+        return f"{self.vendor_code} — {self.vendor_name}"

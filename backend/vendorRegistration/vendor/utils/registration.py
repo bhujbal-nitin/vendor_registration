@@ -24,3 +24,25 @@ def generate_registration_no(today: date = None) -> str:
 
     seq = max_seq + 1
     return f"VR-{date_str}-{seq:04d}"
+
+
+def generate_vendor_code() -> str:
+    """
+    System-generated vendor code: VEN0001, VEN0002, ... — global sequence,
+    never resets. Assigned once per registration when it first becomes a
+    VendorMaster record (i.e. on first successful Tally approval).
+    """
+    from vendorRegistration.vendor.models import VendorMaster
+
+    all_codes = VendorMaster.objects.filter(
+        vendor_code__isnull=False
+    ).values_list('vendor_code', flat=True)
+
+    max_seq = 0
+    for code in all_codes:
+        m = re.match(r'^VEN(\d+)$', code)
+        if m:
+            max_seq = max(max_seq, int(m.group(1)))
+
+    seq = max_seq + 1
+    return f"VEN{seq:04d}"

@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import VendorRegistration, VendorUser, VendorDocument, VendorProfile, VendorGST, VendorBankDetails, VendorDocumentExtraction, VendorFieldChangeLog, VendorComparisonResult, VendorApprovalHistory, VendorNotification, TallySyncLog
+from .models import VendorRegistration, VendorUser, VendorDocument, VendorProfile, VendorGST, VendorBankDetails, VendorDocumentExtraction, VendorFieldChangeLog, VendorComparisonResult, VendorApprovalHistory, VendorNotification, TallySyncLog, VendorMaster
 from .serializers import (
     RegisterRequestSerializer, LoginRequestSerializer, DocumentSerializer,
     RegistrationFormSerializer, VendorProfileSerializer, VendorGSTSerializer,
@@ -25,7 +25,7 @@ from . import tally_service
 
 import logging
 logger = logging.getLogger(__name__)
-from .utils.registration import generate_registration_no
+from .utils.registration import generate_registration_no, generate_vendor_code
 from .utils.email import send_password_email
 
 MAX_FAILED_ATTEMPTS = 5
@@ -480,7 +480,14 @@ class VendorReviewView(APIView):
                 "account_holder_name": (bank.account_holder_name if bank else "") or "",
             }
 
-            result = tally_service.create_vendor_ledger(vendor_payload)
+            # If this registration was approved before, re-approval must update/
+            # rename the SAME Tally ledger (ACTION=Alter) instead of creating a
+            # second, orphaned one. The lookup name is whatever Tally currently
+            # has the ledger filed under (the last name we successfully synced).
+            existing_master = VendorMaster.objects.filter(registration=reg).first()
+            existing_ledger_name = existing_master.vendor_name if existing_master else None
+
+            result = tally_service.create_vendor_ledger(vendor_payload, existing_name=existing_ledger_name)
 
             TallySyncLog.objects.create(
                 registration      = reg,
@@ -495,6 +502,32 @@ class VendorReviewView(APIView):
                     {"detail": f"Approval blocked — could not create vendor in Tally: {result['message']}"},
                     status=status.HTTP_502_BAD_GATEWAY,
                 )
+
+            # Best-effort: look up the ledger's internal MASTERID from Tally.
+            # Never blocks approval — the ledger was already saved successfully.
+            lookup = tally_service.fetch_ledger_master_id(vendor_payload["name"])
+            if not lookup["success"]:
+                logger.warning(
+                    "Could not fetch Tally MASTERID for reg %s: %s",
+                    reg.registration_id, lookup["message"],
+                )
+
+            # Tally ledger saved successfully — now add/refresh this vendor in
+            # tb_vendor_master. One row per registration: reuse the existing
+            # vendor_code on re-approval, only generate a new one the first time.
+            vendor_code = existing_master.vendor_code if existing_master else generate_vendor_code()
+            VendorMaster.objects.update_or_create(
+                registration=reg,
+                defaults={
+                    "vendor_code":       vendor_code,
+                    "vendor_name":       vendor_payload["name"],
+                    "pan_number":        vendor_payload["pan"],
+                    "gstin":             vendor_payload["gstin"],
+                    "address":           vendor_payload["address"],
+                    "status":            "Active",
+                    "tally_ledger_code": lookup["master_id"],
+                },
+            )
 
         reg.registration_status = action
         reg.current_stage       = _ACTION_STAGE_MAP.get(action, reg.current_stage)

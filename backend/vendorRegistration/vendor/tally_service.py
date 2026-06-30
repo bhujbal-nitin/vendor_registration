@@ -59,9 +59,21 @@ def _x(value) -> str:
     return xml_escape(str(value or ""), {'"': "&quot;", "'": "&apos;"})
 
 
-def build_ledger_xml(vendor: dict) -> str:
+def build_ledger_xml(vendor: dict, existing_name: str | None = None) -> str:
     """
-    Build the Tally XML payload to create a vendor (Sundry Creditor) ledger.
+    Build the Tally XML payload to create OR update/rename a vendor
+    (Sundry Creditor) ledger.
+
+    First-ever approval (existing_name=None):
+      ACTION="Create", LEDGER NAME=<current vendor name>.
+
+    Re-approval (existing_name=<name Tally currently has the ledger under,
+    from tb_vendor_master.vendor_name>):
+      ACTION="Alter", LEDGER NAME=<existing_name> (the lookup key Tally uses
+      to find the ledger), with the <NAME> child element set to the current
+      vendor name. If the name didn't change, old == new and this is just a
+      plain field update — if it did change, Tally renames the ledger
+      in-place instead of creating a second, orphaned one.
 
     Expected keys in `vendor`:
       name, pan, address, state, pincode, gstin,
@@ -69,6 +81,13 @@ def build_ledger_xml(vendor: dict) -> str:
     """
     applicable_from = _financial_year_start()
     name = _x(vendor.get("name"))
+
+    if existing_name:
+        action      = "Alter"
+        lookup_name = _x(existing_name)
+    else:
+        action      = "Create"
+        lookup_name = name
 
     return f"""<ENVELOPE>
   <HEADER>
@@ -85,7 +104,7 @@ def build_ledger_xml(vendor: dict) -> str:
     </DESC>
     <DATA>
       <TALLYMESSAGE xmlns:UDF="TallyUDF">
-        <LEDGER NAME="{name}" ACTION="Create">
+        <LEDGER NAME="{lookup_name}" ACTION="{action}">
           <NAME>{name}</NAME>
           <PARENT>{_x(TALLY_LEDGER_PARENT)}</PARENT>
           <ISBILLWISEON>{_x(TALLY_ISBILLWISEON)}</ISBILLWISEON>
@@ -126,6 +145,100 @@ def build_ledger_xml(vendor: dict) -> str:
 </ENVELOPE>"""
 
 
+def build_ledger_lookup_xml(ledger_name: str) -> str:
+    """
+    Build an Export/Collection XML request to fetch a ledger's internal
+    MASTERID / GUID from Tally by exact name match.
+    """
+    name = _x(ledger_name)
+    return f"""<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>Ledger Master Info</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVCURRENTCOMPANY>{_x(TALLY_COMPANY_NAME)}</SVCURRENTCOMPANY>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Ledger Master Info" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <FILTER>LedgerNameFilter</FILTER>
+            <FETCH>NAME, GUID, MASTERID, ALTERID</FETCH>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="LedgerNameFilter">$Name = "{name}"</SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>"""
+
+
+def fetch_ledger_master_id(ledger_name: str) -> dict:
+    """
+    Look up a ledger's internal MASTERID/GUID in Tally by exact name match.
+    Best-effort — never raises (this is a secondary enrichment step that
+    must not block an already-successful ledger creation). Returns:
+      {"success": bool, "message": str, "master_id": str|None, "guid": str|None}
+    """
+    xml_payload = build_ledger_lookup_xml(ledger_name)
+
+    try:
+        resp = requests.post(
+            TALLY_URL,
+            data=xml_payload.encode("utf-8"),
+            headers={"Content-Type": "text/xml"},
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as exc:
+        return {
+            "success": False,
+            "message": f"Could not reach Tally at {TALLY_URL}: {exc}",
+            "master_id": None,
+            "guid": None,
+        }
+
+    if not resp.ok:
+        return {
+            "success": False,
+            "message": f"Tally returned HTTP {resp.status_code}: {resp.text[:300]}",
+            "master_id": None,
+            "guid": None,
+        }
+
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError:
+        return {
+            "success": False,
+            "message": f"Unparseable lookup response: {resp.text.strip()[:300]}",
+            "master_id": None,
+            "guid": None,
+        }
+
+    master_id = root.findtext(".//MASTERID")
+    guid      = root.findtext(".//GUID")
+
+    if not master_id or not master_id.strip():
+        return {
+            "success": False,
+            "message": f"Ledger '{ledger_name}' not found in Tally lookup response.",
+            "master_id": None,
+            "guid": None,
+        }
+
+    return {
+        "success": True,
+        "message": "Ledger master info retrieved.",
+        "master_id": master_id.strip(),
+        "guid": (guid or "").strip(),
+    }
+
+
 def _parse_tally_response(raw_xml: str) -> tuple[bool, str]:
     """
     Parse Tally's XML import response and decide success/failure.
@@ -153,17 +266,24 @@ def _parse_tally_response(raw_xml: str) -> tuple[bool, str]:
     altered = _int("ALTERED")
 
     if errors > 0:
-        return False, f"Tally reported {errors} error(s) while creating the ledger."
+        return False, f"Tally reported {errors} error(s) while saving the ledger."
 
-    if created >= 1 or altered >= 1:
+    if created >= 1:
         return True, "Ledger created successfully in Tally."
+    if altered >= 1:
+        return True, "Ledger updated successfully in Tally."
 
-    return False, f"Tally did not confirm ledger creation. Raw response: {raw_xml.strip()[:300]}"
+    return False, f"Tally did not confirm the ledger was saved. Raw response: {raw_xml.strip()[:300]}"
 
 
-def create_vendor_ledger(vendor: dict) -> dict:
+def create_vendor_ledger(vendor: dict, existing_name: str | None = None) -> dict:
     """
-    POST the vendor ledger XML to Tally and verify it was created.
+    POST the vendor ledger XML to Tally and verify it was saved.
+
+    Pass `existing_name` (the name Tally currently has the ledger under,
+    from tb_vendor_master.vendor_name) on re-approval so this updates/renames
+    the existing ledger (ACTION="Alter") instead of creating a duplicate.
+    Omit it for a vendor's first-ever approval (ACTION="Create").
 
     Never raises — always returns a dict so the caller can log every sync
     attempt (success or failure) with the full request/response payload:
@@ -174,7 +294,7 @@ def create_vendor_ledger(vendor: dict) -> dict:
         "response_payload": str,  # raw response text (empty if unreachable)
       }
     """
-    xml_payload = build_ledger_xml(vendor)
+    xml_payload = build_ledger_xml(vendor, existing_name=existing_name)
 
     if not TALLY_COMPANY_NAME:
         return {
@@ -184,8 +304,8 @@ def create_vendor_ledger(vendor: dict) -> dict:
             "response_payload": "",
         }
 
-    logger.info("[Tally] POST %s — creating ledger '%s' in company '%s'",
-                TALLY_URL, vendor.get("name"), TALLY_COMPANY_NAME)
+    verb = f"updating ledger '{existing_name}' → '{vendor.get('name')}'" if existing_name else f"creating ledger '{vendor.get('name')}'"
+    logger.info("[Tally] POST %s — %s in company '%s'", TALLY_URL, verb, TALLY_COMPANY_NAME)
 
     try:
         resp = requests.post(
