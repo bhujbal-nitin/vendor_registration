@@ -187,9 +187,10 @@ function BrandPanel() {
 // ── Sign In Form ───────────────────────────────────────────────────────
 interface SignInFormProps {
   onGoToRegister: () => void
+  onGoToChangePassword: () => void
 }
 
-function SignInForm({ onGoToRegister }: SignInFormProps) {
+function SignInForm({ onGoToRegister, onGoToChangePassword }: SignInFormProps) {
   const navigate = useNavigate()
   const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState({ pan: '', password: '' })
@@ -226,6 +227,10 @@ function SignInForm({ onGoToRegister }: SignInFormProps) {
         return
       }
       sessionStorage.setItem('vendor_user', JSON.stringify(data))
+      if ((data as { must_change_password?: string }).must_change_password === 'Y') {
+        onGoToChangePassword()
+        return
+      }
       navigate('/vendor-registration/home')
     } catch {
       setError('Unable to reach the server. Please try again later.')
@@ -307,9 +312,9 @@ function SignInForm({ onGoToRegister }: SignInFormProps) {
           type="button"
           underline="hover"
           sx={{ fontSize: '0.83rem', color: '#FF6B00', fontWeight: 600, border: 'none', background: 'none', cursor: 'pointer' }}
-          onClick={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={onGoToChangePassword}
         >
-          Forgot password?
+          Change Password
         </Link>
       </Box>
 
@@ -489,8 +494,228 @@ function RegisterForm({ onGoToLogin }: RegisterFormProps) {
   )
 }
 
+// ── Change Password Form ───────────────────────────────────────────────
+interface ChangePasswordFormProps {
+  onGoToLogin: () => void
+}
+
+function ChangePasswordForm({ onGoToLogin }: ChangePasswordFormProps) {
+  const [showCurrent, setShowCurrent] = useState(false)
+  const [showNew, setShowNew]         = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+
+  const storedUser = (() => { try { return JSON.parse(sessionStorage.getItem('vendor_user') || '{}') } catch { return {} } })()
+  const [form, setForm] = useState({ pan: storedUser.pan_number || '', currentPassword: '', newPassword: '', confirmPassword: '' })
+  const [error, setError]     = useState('')
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState(false)
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target
+    setForm((p) => ({ ...p, [name]: name === 'pan' ? value.toUpperCase() : value }))
+    setError('')
+  }
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!form.pan || !form.currentPassword || !form.newPassword || !form.confirmPassword) {
+      setError('Please fill in all fields.')
+      return
+    }
+    if (!PAN_REGEX.test(form.pan)) {
+      setError('Invalid PAN format. Expected format: AAAAA9999A')
+      return
+    }
+    if (form.newPassword.length < 8) {
+      setError('New password must be at least 8 characters.')
+      return
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      setError('New password and confirm password do not match.')
+      return
+    }
+    if (form.newPassword === form.currentPassword) {
+      setError('New password must be different from the current password.')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pan_number:       form.pan,
+          current_password: form.currentPassword,
+          new_password:     form.newPassword,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError((data as { detail?: string }).detail || 'Password change failed. Please try again.')
+        return
+      }
+      sessionStorage.removeItem('vendor_user')
+      setSuccess(true)
+    } catch {
+      setError('Unable to reach the server. Please try again later.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (success) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 2 }}>
+        <Box sx={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg, #FF6B00, #FF8C33)', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 2.5, boxShadow: '0 6px 24px rgba(255,107,0,0.30)' }}>
+          <LockOutlinedIcon sx={{ fontSize: 36, color: '#fff' }} />
+        </Box>
+        <Typography variant="h6" color="text.primary" mb={1}>Password Changed!</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320, mx: 'auto', lineHeight: 1.8 }}>
+          Your password has been updated successfully. Please sign in with your new password.
+        </Typography>
+        <Button variant="contained" size="large" onClick={onGoToLogin} sx={{ mt: 2.5, px: 5, ...primaryBtnSx }} startIcon={<ArrowBackIcon />}>
+          Back to Sign In
+        </Button>
+      </Box>
+    )
+  }
+
+  return (
+    <Box component="form" onSubmit={handleSubmit} noValidate sx={{ pt: 0.5 }}>
+      <Stack direction="row" alignItems="center" spacing={1} mb={0.25}>
+        <IconButton size="small" onClick={onGoToLogin} sx={{ color: '#FF6B00', ml: -0.5 }}>
+          <ArrowBackIcon fontSize="small" />
+        </IconButton>
+        <Typography variant="h5" color="text.primary" gutterBottom>
+          Change Password
+        </Typography>
+      </Stack>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, mt: 0.25, ml: 4.5 }}>
+        Enter your PAN number and set a new password.
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 1.5, borderRadius: 2, fontSize: '0.83rem' }}>{error}</Alert>
+      )}
+
+      <Stack spacing={1.5}>
+        <TextField
+          fullWidth required
+          name="pan"
+          label="PAN Card Number"
+          value={form.pan}
+          onChange={handleChange}
+          placeholder="AAAAA9999A"
+          slotProps={{
+            htmlInput: { maxLength: 10, style: { letterSpacing: '0.12em', fontWeight: 600 } },
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <FingerprintIcon sx={{ color: '#FF6B00', fontSize: 20 }} />
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+
+        <TextField
+          fullWidth required
+          name="currentPassword"
+          label="Current Password"
+          type={showCurrent ? 'text' : 'password'}
+          value={form.currentPassword}
+          onChange={handleChange}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <LockOutlinedIcon sx={{ color: '#FF6B00', fontSize: 20 }} />
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => setShowCurrent((v) => !v)} edge="end" size="small">
+                    {showCurrent ? <VisibilityOffIcon sx={{ fontSize: 18, color: '#9CA3AF' }} /> : <VisibilityIcon sx={{ fontSize: 18, color: '#9CA3AF' }} />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+
+        <TextField
+          fullWidth required
+          name="newPassword"
+          label="New Password"
+          type={showNew ? 'text' : 'password'}
+          value={form.newPassword}
+          onChange={handleChange}
+          helperText="Minimum 8 characters"
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <LockOutlinedIcon sx={{ color: '#FF6B00', fontSize: 20 }} />
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => setShowNew((v) => !v)} edge="end" size="small">
+                    {showNew ? <VisibilityOffIcon sx={{ fontSize: 18, color: '#9CA3AF' }} /> : <VisibilityIcon sx={{ fontSize: 18, color: '#9CA3AF' }} />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+
+        <TextField
+          fullWidth required
+          name="confirmPassword"
+          label="Confirm New Password"
+          type={showConfirm ? 'text' : 'password'}
+          value={form.confirmPassword}
+          onChange={handleChange}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <LockOutlinedIcon sx={{ color: '#FF6B00', fontSize: 20 }} />
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => setShowConfirm((v) => !v)} edge="end" size="small">
+                    {showConfirm ? <VisibilityOffIcon sx={{ fontSize: 18, color: '#9CA3AF' }} /> : <VisibilityIcon sx={{ fontSize: 18, color: '#9CA3AF' }} />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+      </Stack>
+
+      <Button type="submit" fullWidth variant="contained" size="large" disabled={loading} sx={{ mt: 2, ...primaryBtnSx }}>
+        {loading ? <CircularProgress size={22} sx={{ color: '#fff' }} /> : 'Change Password'}
+      </Button>
+
+      <Box sx={{ textAlign: 'center', mt: 1.5 }}>
+        <Typography variant="body2" color="text.secondary" display="inline">Remember your password?{' '}</Typography>
+        <Link
+          component="button" type="button" underline="hover" onClick={onGoToLogin}
+          sx={{ color: '#FF6B00', fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', border: 'none', background: 'none', verticalAlign: 'baseline' }}
+        >
+          Sign in
+        </Link>
+      </Box>
+    </Box>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────
-type View = 'login' | 'register'
+type View = 'login' | 'register' | 'change-password'
 
 export default function VendorLogin() {
   const [view, setView] = useState<View>('login')
@@ -547,9 +772,14 @@ export default function VendorLogin() {
 
               <Divider sx={{ mb: 2, borderColor: '#F3F4F6' }} />
 
-              {view === 'login'
-                ? <SignInForm onGoToRegister={() => setView('register')} />
-                : <RegisterForm onGoToLogin={() => setView('login')} />}
+              {view === 'login' && (
+                <SignInForm
+                  onGoToRegister={() => setView('register')}
+                  onGoToChangePassword={() => setView('change-password')}
+                />
+              )}
+              {view === 'register' && <RegisterForm onGoToLogin={() => setView('login')} />}
+              {view === 'change-password' && <ChangePasswordForm onGoToLogin={() => setView('login')} />}
 
               <Divider sx={{ mt: 2, mb: 1, borderColor: '#F3F4F6' }} />
               <Typography variant="caption" color="text.secondary" textAlign="center" display="block">

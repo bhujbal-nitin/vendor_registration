@@ -131,11 +131,51 @@ class LoginView(APIView):
             "user_id":              vendor_user.user_id,
             "registration_id":      vendor_reg.registration_id if vendor_reg else None,
             "registration_no":      vendor_reg.registration_no if vendor_reg else None,
+            "pan_number":           vendor_user.pan_number,
             "email":                vendor_user.email,
             "must_change_password": vendor_user.must_change_password,
             "registration_status":  vendor_reg.registration_status if vendor_reg else None,
             "current_stage":        vendor_reg.current_stage if vendor_reg else None,
         })
+
+
+class ChangePasswordView(APIView):
+    def post(self, request):
+        pan_number       = (request.data.get("pan_number") or "").strip().upper()
+        current_password = (request.data.get("current_password") or "").strip()
+        new_password     = (request.data.get("new_password") or "").strip()
+
+        if not pan_number or not current_password or not new_password:
+            return Response(
+                {"detail": "pan_number, current_password and new_password are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {"detail": "New password must be at least 8 characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            vendor_user = VendorUser.objects.get(pan_number=pan_number)
+        except VendorUser.DoesNotExist:
+            return Response(
+                {"detail": "Invalid PAN number or password."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not verify_password(current_password, vendor_user.password_hash):
+            return Response(
+                {"detail": "Current password is incorrect."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        vendor_user.password_hash        = hash_password(new_password)
+        vendor_user.must_change_password = "N"
+        vendor_user.save()
+
+        return Response({"message": "Password changed successfully."})
 
 
 ALLOWED_EXTENSIONS = getattr(settings, "ALLOWED_UPLOAD_EXTENSIONS", {".pdf", ".png", ".jpg", ".jpeg"})

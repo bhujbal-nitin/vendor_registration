@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-    RegisterView, LoginView,
+    RegisterView, LoginView, ChangePasswordView,
     DocumentUploadView, DocumentListView, DocumentDeleteView, DocumentDownloadView,
     RegistrationFormView,
     VendorListView, VendorDetailView, VendorReviewView,
@@ -10,8 +10,9 @@ from .views import (
 )
 
 urlpatterns = [
-    path("auth/register", RegisterView.as_view(), name="vendor-register"),
-    path("auth/login",    LoginView.as_view(),    name="vendor-login"),
+    path("auth/register",         RegisterView.as_view(),        name="vendor-register"),
+    path("auth/login",            LoginView.as_view(),           name="vendor-login"),
+    path("auth/change-password",  ChangePasswordView.as_view(),  name="vendor-change-password"),
 
     path("documents/upload",                       DocumentUploadView.as_view(),   name="document-upload"),
     path("documents/",                             DocumentListView.as_view(),     name="document-list"),
